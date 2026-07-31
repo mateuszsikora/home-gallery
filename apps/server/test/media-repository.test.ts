@@ -145,19 +145,74 @@ describe('media repository', () => {
   });
 
   it('updates the mutable fields only', () => {
-    const record = repository.create(uploadInput(1));
+    const first = repository.create(uploadInput(1));
+    repository.create(uploadInput(2));
 
-    const updated = repository.update(record.id, {
+    const updated = repository.update(first.id, {
       enabled: false,
-      sortOrder: 7,
+      sortOrder: 1,
     });
 
     expect(updated).toMatchObject({
-      id: record.id,
+      id: first.id,
       enabled: false,
-      sortOrder: 7,
-      storedFilename: record.storedFilename,
+      sortOrder: 1,
+      storedFilename: first.storedFilename,
     });
+  });
+
+  it('moves a record to the requested position and closes the gap', () => {
+    const first = repository.create(uploadInput(1));
+    const second = repository.create(uploadInput(2));
+    const third = repository.create(uploadInput(3));
+    const fourth = repository.create(uploadInput(4));
+
+    repository.update(fourth.id, { sortOrder: 1 });
+
+    expect(repository.list().items).toMatchObject([
+      { id: first.id, sortOrder: 0 },
+      { id: fourth.id, sortOrder: 1 },
+      { id: second.id, sortOrder: 2 },
+      { id: third.id, sortOrder: 3 },
+    ]);
+  });
+
+  it('moves a record to the end when the position is past the last one', () => {
+    const first = repository.create(uploadInput(1));
+    const second = repository.create(uploadInput(2));
+    const third = repository.create(uploadInput(3));
+
+    expect(repository.update(first.id, { sortOrder: 999 })?.sortOrder).toBe(2);
+    expect(repository.list().items.map((item) => item.id)).toEqual([
+      second.id,
+      third.id,
+      first.id,
+    ]);
+  });
+
+  it('keeps the playlist stable when the same move is repeated', () => {
+    repository.create(uploadInput(1));
+    repository.create(uploadInput(2));
+    const third = repository.create(uploadInput(3));
+
+    repository.update(third.id, { sortOrder: 0 });
+    const afterFirstMove = repository.list().items;
+    repository.update(third.id, { sortOrder: 0 });
+
+    expect(repository.list().items).toEqual(afterFirstMove);
+  });
+
+  it('renumbers the remaining media after a deletion', () => {
+    const first = repository.create(uploadInput(1));
+    repository.create(uploadInput(2));
+    repository.create(uploadInput(3));
+
+    repository.delete(first.id);
+
+    expect(repository.list().items.map((item) => item.sortOrder)).toEqual([
+      0, 1,
+    ]);
+    expect(repository.create(uploadInput(4)).sortOrder).toBe(2);
   });
 
   it('leaves a record untouched for an empty update', () => {

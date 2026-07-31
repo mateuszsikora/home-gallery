@@ -22,7 +22,11 @@ import {
 import { registerAuthentication } from './http/authentication.js';
 import { registerErrorHandling } from './http/errors.js';
 import { registerHealthRoute } from './http/health-route.js';
+import { registerMediaContentRoute } from './http/media-content-route.js';
+import { registerMediaRoutes } from './http/media-routes.js';
 import { registerMediaUploadRoute } from './http/media-upload-route.js';
+import { registerPlaylistRoute } from './http/playlist-route.js';
+import { registerSettingsRoutes } from './http/settings-routes.js';
 import {
   createMediaStorage,
   type MediaStorage,
@@ -123,6 +127,10 @@ export const createApp = async (
       startedAt,
     });
     registerMediaUploadRoute(app);
+    registerMediaRoutes(app);
+    registerMediaContentRoute(app);
+    registerPlaylistRoute(app);
+    registerSettingsRoutes(app);
 
     app.log.info(
       {

@@ -39,14 +39,19 @@ export interface CreateMediaInput {
   height: number;
 }
 
+/** An absent or explicitly undefined field means "leave this value unchanged". */
 export interface MediaUpdate {
-  enabled?: boolean;
-  sortOrder?: number;
+  enabled?: boolean | undefined;
+  /**
+   * Target position in playlist order. Positions are kept contiguous, so a
+   * value beyond the end of the library moves the record to the last position.
+   */
+  sortOrder?: number | undefined;
 }
 
 export interface ListMediaOptions {
-  limit?: number;
-  cursor?: string;
+  limit?: number | undefined;
+  cursor?: string | undefined;
 }
 
 export interface MediaRepository {
@@ -74,6 +79,12 @@ interface MediaRow {
   sort_order: number;
   width: number;
   height: number;
+}
+
+/** Minimal projection used while rewriting playlist positions. */
+interface OrderRow {
+  id: string;
+  sort_order: number;
 }
 
 const SELECT_COLUMNS = `
@@ -171,6 +182,15 @@ export const createMediaRepository = (
   const selectEnabledStatement = database.prepare(
     `SELECT ${SELECT_COLUMNS} FROM media WHERE enabled = 1 ORDER BY sort_order, id`,
   );
+  const selectOrderStatement = database.prepare(
+    'SELECT id, sort_order FROM media ORDER BY sort_order, id',
+  );
+  const updateSortOrderStatement = database.prepare(
+    'UPDATE media SET sort_order = ? WHERE id = ?',
+  );
+  const updateEnabledStatement = database.prepare(
+    'UPDATE media SET enabled = ? WHERE id = ?',
+  );
   const nextSortOrderStatement = database.prepare(
     'SELECT COALESCE(MAX(sort_order) + 1, 0) AS next FROM media',
   );
@@ -226,6 +246,33 @@ export const createMediaRepository = (
     },
   );
 
+  /**
+   * Rewrites the playlist so positions are `0..n-1` without gaps or duplicates.
+   * Only rows that actually move are written, which keeps a repeated update from
+   * touching the whole table.
+   */
+  const writeContiguousOrder = (ordered: readonly OrderRow[]): void => {
+    ordered.forEach((row, position) => {
+      if (row.sort_order !== position) {
+        updateSortOrderStatement.run(position, row.id);
+      }
+    });
+  };
+
+  const moveToPosition = (id: MediaId, position: number): void => {
+    const rows = selectOrderStatement.all() as OrderRow[];
+    const currentIndex = rows.findIndex((row) => row.id === id);
+    const moved = rows[currentIndex];
+
+    if (moved === undefined) {
+      return;
+    }
+
+    rows.splice(currentIndex, 1);
+    rows.splice(Math.min(position, rows.length), 0, moved);
+    writeContiguousOrder(rows);
+  };
+
   const applyUpdate = database.transaction(
     (id: MediaId, update: MediaUpdate): MediaRecord | undefined => {
       const existing = findById(id);
@@ -234,12 +281,8 @@ export const createMediaRepository = (
         return undefined;
       }
 
-      const assignments: string[] = [];
-      const values: (number | string)[] = [];
-
       if (update.enabled !== undefined) {
-        assignments.push('enabled = ?');
-        values.push(update.enabled ? 1 : 0);
+        updateEnabledStatement.run(update.enabled ? 1 : 0, id);
       }
 
       if (update.sortOrder !== undefined) {
@@ -247,21 +290,24 @@ export const createMediaRepository = (
           throw new RangeError('Sort order must be a non-negative integer');
         }
 
-        assignments.push('sort_order = ?');
-        values.push(update.sortOrder);
+        moveToPosition(id, update.sortOrder);
       }
-
-      if (assignments.length === 0) {
-        return existing;
-      }
-
-      database
-        .prepare(`UPDATE media SET ${assignments.join(', ')} WHERE id = ?`)
-        .run(...values, id);
 
       return findById(id);
     },
   );
+
+  const removeRecord = database.transaction((id: MediaId): boolean => {
+    if (deleteStatement.run(id).changes === 0) {
+      return false;
+    }
+
+    // Closing the gap keeps the remaining positions meaningful as targets for a
+    // later reorder.
+    writeContiguousOrder(selectOrderStatement.all() as OrderRow[]);
+
+    return true;
+  });
 
   return {
     create: (input) => insert(input),
@@ -304,7 +350,7 @@ export const createMediaRepository = (
 
     update: (id, update) => applyUpdate(id, update),
 
-    delete: (id) => deleteStatement.run(id).changes > 0,
+    delete: (id) => removeRecord(id),
 
     count: () => (countStatement.get() as { total: number }).total,
   };
