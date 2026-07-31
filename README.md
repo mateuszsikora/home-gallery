@@ -4,6 +4,8 @@ Home Gallery is a self-hosted application for collecting photos through Telegram
 
 The project is under active development. The product requirements are in [docs/SPECIFICATION.md](docs/SPECIFICATION.md), the delivery sequence is in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), and execution is tracked in the [GitHub issue backlog](https://github.com/mateuszsikora/home-gallery/issues).
 
+The MVP HTTP routes and representative payloads are documented in [docs/API.md](docs/API.md).
+
 ## Local development
 
 The foundation requires Node.js 24 and the npm version bundled with it. From a clean checkout:
