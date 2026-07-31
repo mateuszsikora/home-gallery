@@ -6,7 +6,7 @@ Start a new Conductor session and enter:
 
 > Read the Markdown files and continue the project.
 
-No issue number is required. `AGENTS.md` instructs the agent to inspect GitHub, choose the next unblocked issue, implement only that issue, validate the work, and open a pull request against `master`.
+No issue number is required. `AGENTS.md` instructs the agent to inspect GitHub, choose the next unblocked issue, implement only that issue, validate the work, and open a pull request against `main`.
 
 ## Expected session outcome
 

@@ -14,8 +14,8 @@ When the user asks you to read the Markdown files or continue the project:
 6. Follow the acceptance criteria in the issue and the architecture in `docs/IMPLEMENTATION_PLAN.md`.
 7. Add or update automated tests for behavior introduced by the change.
 8. Run the narrowest relevant checks, then run the repository-wide checks required by the issue.
-9. Review `git diff origin/master...` for accidental or unrelated changes.
-10. Commit the work with an English conventional commit message, push the workspace branch, and open a pull request against `master`.
+9. Review `git diff origin/main...` for accidental or unrelated changes.
+10. Commit the work with an English conventional commit message, push the workspace branch, and open a pull request against `main`.
 
 ## Pull request requirements
 
