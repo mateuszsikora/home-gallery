@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { ALLOW_ALL_ORIGINS, type ServerConfig } from '@home-gallery/config';
 import Fastify, { type FastifyInstance } from 'fastify';
 
@@ -21,6 +22,7 @@ import {
 import { registerAuthentication } from './http/authentication.js';
 import { registerErrorHandling } from './http/errors.js';
 import { registerHealthRoute } from './http/health-route.js';
+import { registerMediaUploadRoute } from './http/media-upload-route.js';
 import {
   createMediaStorage,
   type MediaStorage,
@@ -95,6 +97,18 @@ export const createApp = async (
     registerErrorHandling(app);
     registerAuthentication(app, config.apiToken);
 
+    await app.register(multipart, {
+      limits: {
+        fieldNameSize: 64,
+        fieldSize: 1_024,
+        fields: 4,
+        fileSize: config.maxUploadBytes,
+        files: 1,
+        parts: 5,
+      },
+      throwFileSizeLimit: true,
+    });
+
     await app.register(cors, {
       origin: toCorsOrigin(config.allowedOrigins),
       methods: CORS_METHODS,
@@ -108,6 +122,7 @@ export const createApp = async (
       version: config.version,
       startedAt,
     });
+    registerMediaUploadRoute(app);
 
     app.log.info(
       {
