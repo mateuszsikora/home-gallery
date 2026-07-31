@@ -12,6 +12,9 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
+    "paths": {
+      "@home-gallery/shared-types": ["./packages/shared-types/src/index.ts"]
+    },
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
