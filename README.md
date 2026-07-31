@@ -63,6 +63,20 @@ npm run dev --workspace @home-gallery/admin -- --port 3011
 
 When the API and administration application use different origins during local development, include the administration origin in `HOME_GALLERY_ALLOWED_ORIGINS` before starting the server. For the command above, use `HOME_GALLERY_ALLOWED_ORIGINS=http://localhost:3011`. In production, a reverse proxy can serve the API and administration application from one origin.
 
+### Running the Telegram bot
+
+Create a bot with BotFather, obtain the numeric Telegram user IDs that may contribute, and configure the bot variables documented in `.env.example`. The bot and server use the same `HOME_GALLERY_API_TOKEN` value.
+
+```bash
+HOME_GALLERY_TELEGRAM_BOT_TOKEN="<bot-token>" \
+HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS="123456789,987654321" \
+HOME_GALLERY_API_URL=http://localhost:3012 \
+HOME_GALLERY_API_TOKEN="<server-api-token>" \
+npm run start --workspace @home-gallery/telegram-bot
+```
+
+Allowed users can send Telegram photo messages or JPEG, PNG, WebP, HEIC, and HEIF image documents. The bot chooses the largest available Telegram photo, uploads it with contributor attribution, and deletes the source message only after Home Gallery confirms storage. Unsupported or unauthorized submissions are not downloaded. Failed uploads remain in the chat and receive a status reply so they can be retried.
+
 ## Agent-driven development
 
 Development is organized as one GitHub issue per pull request. A new agent session only needs this prompt:
