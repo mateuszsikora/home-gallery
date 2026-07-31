@@ -2,7 +2,29 @@
 
 Home Gallery is a self-hosted application for collecting photos through Telegram and displaying them as a fullscreen browser slideshow. It also provides a web administration interface for managing the local media library.
 
-The project is currently in the planning stage. The product requirements are in [docs/SPECIFICATION.md](docs/SPECIFICATION.md), the delivery sequence is in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), and execution is tracked in the [GitHub issue backlog](https://github.com/mateuszsikora/home-gallery/issues).
+The project is under active development. The product requirements are in [docs/SPECIFICATION.md](docs/SPECIFICATION.md), the delivery sequence is in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), and execution is tracked in the [GitHub issue backlog](https://github.com/mateuszsikora/home-gallery/issues).
+
+## Local development
+
+The foundation requires Node.js 24 and the npm version bundled with it. From a clean checkout:
+
+```bash
+npm ci
+npm run check
+```
+
+The repository-wide commands are:
+
+- `npm run format` to format supported files;
+- `npm run format:check` to verify formatting;
+- `npm run lint` to run ESLint;
+- `npm run typecheck` to run TypeScript without emitting files;
+- `npm test` to run the test suite once;
+- `npm run test:watch` to rerun tests while files change;
+- `npm run build` to compile every workspace;
+- `npm run check` to run all required checks in CI order.
+
+The npm workspaces are the four applications under `apps/` and the three shared packages under `packages/`. They are intentionally minimal until their corresponding implementation issues are started. Copy `.env.example` to `.env` only when a later service requires local configuration; never commit credentials or runtime data.
 
 ## Agent-driven development
 

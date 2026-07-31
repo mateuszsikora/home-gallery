@@ -6,5 +6,11 @@ node_modules/
 dist/
 coverage/
 data/
+uploads/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.tsbuildinfo
 *.log
 .DS_Store
