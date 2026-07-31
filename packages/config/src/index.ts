@@ -1,1 +1,2 @@
-export const componentName = '@home-gallery/config' as const;
+export * from './errors.js';
+export * from './server.js';

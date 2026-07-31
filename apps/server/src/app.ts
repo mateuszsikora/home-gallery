@@ -1,0 +1,129 @@
+import { join } from 'node:path';
+
+import cors from '@fastify/cors';
+import { ALLOW_ALL_ORIGINS, type ServerConfig } from '@home-gallery/config';
+import Fastify, { type FastifyInstance } from 'fastify';
+
+import {
+  DATABASE_FILENAME,
+  openDatabase,
+  type DatabaseConnection,
+} from './database/connection.js';
+import { migrate } from './database/migrations.js';
+import {
+  createMediaRepository,
+  type MediaRepository,
+} from './database/media-repository.js';
+import {
+  createSettingsRepository,
+  type SettingsRepository,
+} from './database/settings-repository.js';
+import { registerAuthentication } from './http/authentication.js';
+import { registerErrorHandling } from './http/errors.js';
+import { registerHealthRoute } from './http/health-route.js';
+import {
+  createMediaStorage,
+  type MediaStorage,
+} from './storage/media-storage.js';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    config: ServerConfig;
+    database: DatabaseConnection;
+    mediaRepository: MediaRepository;
+    settingsRepository: SettingsRepository;
+    mediaStorage: MediaStorage;
+  }
+}
+
+const CORS_ALLOWED_HEADERS = ['authorization', 'content-type'];
+const CORS_METHODS = ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'];
+
+/**
+ * An empty allowlist keeps the API same-origin only, which is the safe default
+ * for a bearer-protected service on a home network.
+ */
+const toCorsOrigin = (
+  allowedOrigins: readonly string[],
+): typeof ALLOW_ALL_ORIGINS | string[] | false => {
+  if (allowedOrigins.includes(ALLOW_ALL_ORIGINS)) {
+    return ALLOW_ALL_ORIGINS;
+  }
+
+  return allowedOrigins.length > 0 ? [...allowedOrigins] : false;
+};
+
+/**
+ * Builds a ready-to-listen server. Every dependency is derived from the passed
+ * configuration, so tests create an app against an isolated temporary data
+ * directory and never touch the deployment's data directory.
+ */
+export const createApp = async (
+  config: ServerConfig,
+): Promise<FastifyInstance> => {
+  const startedAt = Date.now();
+
+  const storage = createMediaStorage(config.dataDirectory);
+  await storage.initialize();
+  const prunedTemporaryFiles = await storage.pruneTemporaryFiles();
+
+  const database = openDatabase(join(config.dataDirectory, DATABASE_FILENAME));
+
+  try {
+    const appliedMigrations = migrate(database);
+
+    const app = Fastify({
+      logger: {
+        level: config.logLevel,
+        redact: {
+          paths: ['req.headers.authorization', 'req.headers.cookie'],
+          censor: '[redacted]',
+        },
+      },
+    });
+
+    app.addHook('onClose', async () => {
+      database.close();
+    });
+
+    app.decorate('config', config);
+    app.decorate('database', database);
+    app.decorate('mediaRepository', createMediaRepository(database));
+    app.decorate('settingsRepository', createSettingsRepository(database));
+    app.decorate('mediaStorage', storage);
+
+    registerErrorHandling(app);
+    registerAuthentication(app, config.apiToken);
+
+    await app.register(cors, {
+      origin: toCorsOrigin(config.allowedOrigins),
+      methods: CORS_METHODS,
+      allowedHeaders: CORS_ALLOWED_HEADERS,
+      credentials: false,
+      maxAge: 600,
+    });
+
+    registerHealthRoute(app, {
+      database,
+      version: config.version,
+      startedAt,
+    });
+
+    app.log.info(
+      {
+        dataDirectory: config.dataDirectory,
+        appliedMigrations,
+        prunedTemporaryFiles,
+        maxUploadBytes: config.maxUploadBytes,
+        maxStoredFiles: config.maxStoredFiles,
+        allowedOrigins: config.allowedOrigins,
+      },
+      'Home Gallery server initialized',
+    );
+
+    return app;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+};
