@@ -1,1 +1,8 @@
-export const componentName = '@home-gallery/frontend' as const;
+export {
+  Gallery,
+  reconcilePlayback,
+  resolveContentUrl,
+  type GalleryProps,
+  type PlaylistClient,
+  type PlaybackState,
+} from './gallery.js';

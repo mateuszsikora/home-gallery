@@ -41,6 +41,17 @@ npm run start --workspace @home-gallery/server
 
 `GET /health` then reports the process state on `http://localhost:3012/health`. The data directory holds the SQLite database and the normalized media, and is created on first start; it must be a persistent volume in production.
 
+### Running the fullscreen gallery
+
+The gallery is an unattended React application that fills the browser viewport, preserves portrait and landscape images without cropping, and follows the playlist timing and playback mode returned by the API. Start it against a running API server with:
+
+```bash
+VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
+npm run dev --workspace @home-gallery/frontend
+```
+
+Open the Vite URL shown in the terminal. The API URL defaults to the gallery page origin when `VITE_HOME_GALLERY_API_URL` is omitted, which is suitable when a reverse proxy serves both applications on one origin. The gallery automatically retries playlist requests every 30 seconds, retains the last usable playlist while the API is unavailable, and needs no interaction during normal playback.
+
 ## Agent-driven development
 
 Development is organized as one GitHub issue per pull request. A new agent session only needs this prompt:
