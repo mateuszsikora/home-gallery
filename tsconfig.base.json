@@ -13,6 +13,7 @@
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
     "paths": {
+      "@home-gallery/config": ["./packages/config/src/index.ts"],
       "@home-gallery/shared-types": ["./packages/shared-types/src/index.ts"]
     },
     "skipLibCheck": true,
