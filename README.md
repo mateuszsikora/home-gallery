@@ -52,6 +52,17 @@ npm run dev --workspace @home-gallery/frontend
 
 Open the Vite URL shown in the terminal. The API URL defaults to the gallery page origin when `VITE_HOME_GALLERY_API_URL` is omitted, which is suitable when a reverse proxy serves both applications on one origin. The gallery automatically retries playlist requests every 30 seconds, retains the last usable playlist while the API is unavailable, and needs no interaction during normal playback.
 
+### Running the administration application
+
+The administration application uses the same API URL and asks for the API bearer token in the browser. The token is kept in `sessionStorage`, is never included in a URL, and is removed when the studio is locked or the tab session ends.
+
+```bash
+VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
+npm run dev --workspace @home-gallery/admin -- --port 3011
+```
+
+When the API and administration application use different origins during local development, include the administration origin in `HOME_GALLERY_ALLOWED_ORIGINS` before starting the server. For the command above, use `HOME_GALLERY_ALLOWED_ORIGINS=http://localhost:3011`. In production, a reverse proxy can serve the API and administration application from one origin.
+
 ## Agent-driven development
 
 Development is organized as one GitHub issue per pull request. A new agent session only needs this prompt:
