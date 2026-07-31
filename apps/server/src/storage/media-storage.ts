@@ -9,7 +9,9 @@ import {
   rm,
   unlink,
 } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 
 /** Directory names created inside the configured data directory. */
 export const MEDIA_DIRECTORY_NAME = 'media';
@@ -70,6 +72,16 @@ export interface TemporaryMediaFile {
   discard(): Promise<void>;
 }
 
+/**
+ * An open stored file. The size is read from the same descriptor the stream
+ * uses, so a concurrent deletion cannot make the two disagree. The caller must
+ * consume or destroy the stream, which closes the descriptor.
+ */
+export interface OpenMediaFile {
+  readonly size: number;
+  readonly stream: Readable;
+}
+
 export interface MediaStorage {
   readonly rootDirectory: string;
   readonly mediaDirectory: string;
@@ -78,6 +90,7 @@ export interface MediaStorage {
   createTemporaryFile(): Promise<TemporaryMediaFile>;
   resolveMediaPath(storedFilename: string): string;
   exists(storedFilename: string): Promise<boolean>;
+  openForRead(storedFilename: string): Promise<OpenMediaFile | undefined>;
   remove(storedFilename: string): Promise<boolean>;
   pruneTemporaryFiles(): Promise<number>;
 }
@@ -169,6 +182,31 @@ export const createMediaStorage = (rootDirectory: string): MediaStorage => {
           return false;
         }
 
+        throw error;
+      }
+    },
+
+    openForRead: async (storedFilename) => {
+      let handle: FileHandle;
+
+      try {
+        handle = await open(
+          resolveMediaPath(storedFilename),
+          constants.O_RDONLY,
+        );
+      } catch (error) {
+        if (isMissingFileError(error)) {
+          return undefined;
+        }
+
+        throw error;
+      }
+
+      try {
+        const { size } = await handle.stat();
+        return { size, stream: handle.createReadStream() };
+      } catch (error) {
+        await handle.close();
         throw error;
       }
     },

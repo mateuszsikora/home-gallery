@@ -10,6 +10,7 @@ The shared runtime schemas and TypeScript types live in `@home-gallery/shared-ty
 - Media IDs are UUIDs. Pagination cursors are opaque and clients must return them unchanged.
 - Normalized MVP media is served as `image/webp`.
 - A successful deletion returns `204 No Content`.
+- JSON responses are sent with `Cache-Control: no-store`; normalized image bytes are immutable and are sent with a long-lived `Cache-Control` and an `ETag`.
 
 Every non-successful response uses this shape:
 
@@ -111,6 +112,10 @@ A successful upload returns `201 Created` with an administrative media record:
 
 The response is the complete updated media record. `GET /api/media/{id}` returns the same representation.
 
+`sortOrder` is a position in the playlist rather than a free-form weight. The server keeps positions contiguous from `0`, so writing a position moves the record there and shifts the others, a position beyond the last one moves the record to the end, and deleting a record closes the gap it leaves. Repeating the same update therefore produces the same playlist.
+
+An unknown or malformed media identifier is reported as `not_found`.
+
 ### Playlist and content
 
 `GET /api/playlist` exposes only enabled media. It omits contributor and internal storage metadata:
@@ -134,7 +139,9 @@ The response is the complete updated media record. `GET /api/media/{id}` returns
 }
 ```
 
-`GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response.
+Items are listed in playlist order. `settings.playbackMode` tells the client whether to play them in that order or to shuffle them, so the response itself stays deterministic.
+
+`GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response, and all three cases answer identically so an unauthenticated caller cannot tell them apart.
 
 ### Settings
 

@@ -111,6 +111,32 @@ describe('media storage', () => {
     expect(await storage.exists('absent.webp')).toBe(false);
   });
 
+  it('opens a stored file for reading with its size', async () => {
+    const temporary = await storage.createTemporaryFile();
+
+    await writeFile(temporary.path, 'image-bytes');
+    await temporary.commit('readable.webp');
+
+    const file = await storage.openForRead('readable.webp');
+
+    expect(file?.size).toBe('image-bytes'.length);
+    expect(file).toBeDefined();
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of file?.stream ?? []) {
+      chunks.push(chunk as Buffer);
+    }
+
+    expect(Buffer.concat(chunks).toString()).toBe('image-bytes');
+  });
+
+  it('reports a missing file instead of failing to open it', async () => {
+    expect(await storage.openForRead('absent.webp')).toBeUndefined();
+    await expect(storage.openForRead('../escape.webp')).rejects.toThrow(
+      UnsafeStoredFilenameError,
+    );
+  });
+
   it('removes a stored file at most once', async () => {
     const temporary = await storage.createTemporaryFile();
 
