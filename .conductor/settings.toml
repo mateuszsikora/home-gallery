@@ -1,0 +1,6 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[prompts]
+general = "Read every tracked Markdown file first. Follow AGENTS.md, select exactly one ready GitHub issue, implement and validate only that issue, then push the workspace branch and open a pull request against main. All GitHub-visible content must be in English."
+code_review = "Review the selected issue's acceptance criteria first. Focus on correctness, security of untrusted media input, missing tests, API contract changes, and accidental scope expansion."
+create_pr = "Open the pull request against main in English. Include Closes #<issue-number>, a concise behavior summary, and exact validation commands with results. Do not merge it."
