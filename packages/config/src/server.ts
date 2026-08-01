@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { isIP } from 'node:net';
 
 import { z } from 'zod';
 
@@ -13,12 +14,24 @@ export const DEFAULT_SERVER_PORT = 3012;
 export const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_MAX_STORED_FILES = 5_000;
 export const DEFAULT_SERVER_VERSION = '0.0.0';
+export const DEFAULT_AUTH_RATE_LIMIT_MAX = 10;
+export const DEFAULT_AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
+export const DEFAULT_UPLOAD_RATE_LIMIT_MAX = 30;
+export const DEFAULT_UPLOAD_RATE_LIMIT_WINDOW_MS = 60_000;
 
 export const MIN_API_TOKEN_LENGTH = 32;
 export const MAX_API_TOKEN_LENGTH = 512;
 export const MIN_MAX_UPLOAD_BYTES = 1024;
 export const MAX_MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 export const MAX_MAX_STORED_FILES = 1_000_000;
+export const MAX_RATE_LIMIT_REQUESTS = 100_000;
+export const MIN_RATE_LIMIT_WINDOW_MS = 1_000;
+export const MAX_RATE_LIMIT_WINDOW_MS = 86_400_000;
+
+export interface RateLimitConfig {
+  max: number;
+  windowMs: number;
+}
 
 /** Matches the levels accepted by the server's pino logger. */
 export const LOG_LEVELS = [
@@ -41,7 +54,13 @@ export const ALLOW_ALL_ORIGINS = '*';
 export interface ServerConfig {
   host: string;
   port: number;
-  apiToken: string;
+  administrationTokens: readonly string[];
+  ingestionTokens: readonly string[];
+  allowAdministrationUploads: boolean;
+  authenticationRateLimit: RateLimitConfig;
+  uploadRateLimit: RateLimitConfig;
+  /** IP addresses and CIDRs of proxies allowed to supply forwarding headers. */
+  trustedProxies: readonly string[];
   dataDirectory: string;
   maxUploadBytes: number;
   maxStoredFiles: number;
@@ -66,7 +85,7 @@ const hostSchema = z.string().trim().min(1, 'Must not be empty').max(255);
 
 const portSchema = integerVariable(1, 65_535);
 
-const apiTokenSchema = z
+const credentialTokenSchema = z
   .string()
   .trim()
   .min(
@@ -78,6 +97,51 @@ const apiTokenSchema = z
     `Must be at most ${MAX_API_TOKEN_LENGTH} characters`,
   )
   .refine((token) => !/\s/u.test(token), 'Must not contain whitespace');
+
+const booleanVariable = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.enum(['true', 'false']))
+  .transform((value) => value === 'true');
+
+const TRUSTED_PROXY_ALIASES = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+const isValidTrustedProxy = (entry: string): boolean => {
+  if (TRUSTED_PROXY_ALIASES.has(entry)) {
+    return true;
+  }
+
+  const slash = entry.lastIndexOf('/');
+  const address = slash < 0 ? entry : entry.slice(0, slash);
+  const family = isIP(address);
+
+  if (family === 0) {
+    return false;
+  }
+
+  if (slash < 0) {
+    return true;
+  }
+
+  const prefix = entry.slice(slash + 1);
+  const maximum = family === 4 ? 32 : 128;
+
+  return /^\d+$/u.test(prefix) && Number(prefix) <= maximum;
+};
+
+const trustedProxiesSchema = z
+  .string()
+  .transform((value) =>
+    value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  )
+  .refine(
+    (entries) => entries.every(isValidTrustedProxy),
+    'Must contain only IP addresses, CIDRs, or supported proxy range aliases',
+  );
 
 const dataDirectorySchema = z
   .string()
@@ -146,7 +210,28 @@ const versionSchema = z.string().trim().min(1, 'Must not be empty').max(64);
 const serverEnvSchema = z.object({
   HOME_GALLERY_HOST: hostSchema.optional(),
   HOME_GALLERY_PORT: portSchema.optional(),
-  HOME_GALLERY_API_TOKEN: apiTokenSchema,
+  HOME_GALLERY_ADMIN_TOKEN: credentialTokenSchema,
+  HOME_GALLERY_ADMIN_TOKEN_PREVIOUS: credentialTokenSchema.optional(),
+  HOME_GALLERY_INGESTION_TOKEN: credentialTokenSchema,
+  HOME_GALLERY_INGESTION_TOKEN_PREVIOUS: credentialTokenSchema.optional(),
+  HOME_GALLERY_ALLOW_ADMIN_UPLOADS: booleanVariable.optional(),
+  HOME_GALLERY_AUTH_RATE_LIMIT_MAX: integerVariable(
+    1,
+    MAX_RATE_LIMIT_REQUESTS,
+  ).optional(),
+  HOME_GALLERY_AUTH_RATE_LIMIT_WINDOW_MS: integerVariable(
+    MIN_RATE_LIMIT_WINDOW_MS,
+    MAX_RATE_LIMIT_WINDOW_MS,
+  ).optional(),
+  HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX: integerVariable(
+    1,
+    MAX_RATE_LIMIT_REQUESTS,
+  ).optional(),
+  HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS: integerVariable(
+    MIN_RATE_LIMIT_WINDOW_MS,
+    MAX_RATE_LIMIT_WINDOW_MS,
+  ).optional(),
+  HOME_GALLERY_TRUSTED_PROXIES: trustedProxiesSchema.optional(),
   HOME_GALLERY_DATA_DIR: dataDirectorySchema,
   HOME_GALLERY_MAX_UPLOAD_BYTES: integerVariable(
     MIN_MAX_UPLOAD_BYTES,
@@ -220,7 +305,36 @@ export const loadServerConfig = (
   return {
     host: values.HOME_GALLERY_HOST ?? DEFAULT_SERVER_HOST,
     port: values.HOME_GALLERY_PORT ?? DEFAULT_SERVER_PORT,
-    apiToken: values.HOME_GALLERY_API_TOKEN,
+    administrationTokens: [
+      values.HOME_GALLERY_ADMIN_TOKEN,
+      ...(values.HOME_GALLERY_ADMIN_TOKEN_PREVIOUS === undefined
+        ? []
+        : [values.HOME_GALLERY_ADMIN_TOKEN_PREVIOUS]),
+    ],
+    ingestionTokens: [
+      values.HOME_GALLERY_INGESTION_TOKEN,
+      ...(values.HOME_GALLERY_INGESTION_TOKEN_PREVIOUS === undefined
+        ? []
+        : [values.HOME_GALLERY_INGESTION_TOKEN_PREVIOUS]),
+    ],
+    allowAdministrationUploads:
+      values.HOME_GALLERY_ALLOW_ADMIN_UPLOADS ?? false,
+    authenticationRateLimit: {
+      max:
+        values.HOME_GALLERY_AUTH_RATE_LIMIT_MAX ?? DEFAULT_AUTH_RATE_LIMIT_MAX,
+      windowMs:
+        values.HOME_GALLERY_AUTH_RATE_LIMIT_WINDOW_MS ??
+        DEFAULT_AUTH_RATE_LIMIT_WINDOW_MS,
+    },
+    uploadRateLimit: {
+      max:
+        values.HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX ??
+        DEFAULT_UPLOAD_RATE_LIMIT_MAX,
+      windowMs:
+        values.HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS ??
+        DEFAULT_UPLOAD_RATE_LIMIT_WINDOW_MS,
+    },
+    trustedProxies: values.HOME_GALLERY_TRUSTED_PROXIES ?? [],
     dataDirectory: values.HOME_GALLERY_DATA_DIR,
     maxUploadBytes:
       values.HOME_GALLERY_MAX_UPLOAD_BYTES ?? DEFAULT_MAX_UPLOAD_BYTES,

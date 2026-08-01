@@ -36,6 +36,7 @@ const STATUS_TO_ERROR_CODE: Readonly<Record<number, ApiErrorCode>> = {
   409: 'conflict',
   413: 'payload_too_large',
   415: 'unsupported_media_type',
+  429: 'rate_limited',
 };
 
 const toApiError = (error: unknown): ApiError => {
@@ -76,6 +77,8 @@ export const registerErrorHandling = (app: FastifyInstance): void => {
 
     if (apiError.code === 'internal_error') {
       request.log.error({ err: error }, 'Unhandled request failure');
+    } else if (apiError.code === 'rate_limited') {
+      request.log.debug({ code: apiError.code }, 'Request rate limited');
     } else {
       request.log.info({ err: error, code: apiError.code }, 'Request rejected');
     }

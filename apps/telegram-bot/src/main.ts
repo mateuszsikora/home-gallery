@@ -16,7 +16,7 @@ const start = async (): Promise<void> => {
 
   try {
     const config = loadTelegramBotConfig();
-    secrets = [config.botToken, config.apiToken];
+    secrets = [config.botToken, config.ingestionToken];
     const bot = createTelegramBot(config, logger);
     let stopping = false;
 

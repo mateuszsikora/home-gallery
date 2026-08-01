@@ -15,6 +15,8 @@ import { migrate } from '../src/database/migrations.js';
 import type { CreateMediaInput } from '../src/database/media-repository.js';
 
 export const TEST_API_TOKEN = 'test-token-0123456789abcdef0123456789ab';
+export const TEST_INGESTION_TOKEN =
+  'ingestion-token-0123456789abcdef0123456789';
 
 /**
  * Every test runs against a fresh directory under the OS temporary directory so
@@ -33,7 +35,12 @@ export const createTestConfig = (
 ): ServerConfig => ({
   host: '127.0.0.1',
   port: 0,
-  apiToken: TEST_API_TOKEN,
+  administrationTokens: [TEST_API_TOKEN],
+  ingestionTokens: [TEST_INGESTION_TOKEN],
+  allowAdministrationUploads: false,
+  authenticationRateLimit: { max: 10, windowMs: 60_000 },
+  uploadRateLimit: { max: 30, windowMs: 60_000 },
+  trustedProxies: [],
   dataDirectory,
   maxUploadBytes: 1024 * 1024,
   maxStoredFiles: 100,

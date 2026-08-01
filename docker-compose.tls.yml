@@ -1,0 +1,55 @@
+services:
+  server:
+    environment:
+      # The only HTTP proxies in this dedicated network are project services.
+      HOME_GALLERY_TRUSTED_PROXIES: uniquelocal
+  caddy:
+    image: caddy:2.11.4-alpine
+    platform: linux/amd64
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      HOME_GALLERY_TLS_GALLERY_HOST: ${HOME_GALLERY_TLS_GALLERY_HOST:?Set HOME_GALLERY_TLS_GALLERY_HOST}
+      HOME_GALLERY_TLS_ADMIN_HOST: ${HOME_GALLERY_TLS_ADMIN_HOST:?Set HOME_GALLERY_TLS_ADMIN_HOST}
+    ports:
+      - '${HOME_GALLERY_TLS_HTTP_PORT:-80}:80'
+      - '${HOME_GALLERY_TLS_HTTPS_PORT:-443}:443'
+      - '${HOME_GALLERY_TLS_HTTPS_PORT:-443}:443/udp'
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - home-gallery-caddy-data:/data
+      - home-gallery-caddy-config:/config
+    depends_on:
+      gallery:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+    networks:
+      - home-gallery
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'caddy',
+          'validate',
+          '--config',
+          '/etc/caddy/Caddyfile',
+          '--adapter',
+          'caddyfile',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  home-gallery-caddy-data:
+  home-gallery-caddy-config:

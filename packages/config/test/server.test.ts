@@ -4,19 +4,25 @@ import { describe, expect, it } from 'vitest';
 
 import { ConfigurationError } from '../src/errors.js';
 import {
+  DEFAULT_AUTH_RATE_LIMIT_MAX,
+  DEFAULT_AUTH_RATE_LIMIT_WINDOW_MS,
   DEFAULT_MAX_STORED_FILES,
   DEFAULT_MAX_UPLOAD_BYTES,
   DEFAULT_SERVER_HOST,
   DEFAULT_SERVER_PORT,
+  DEFAULT_UPLOAD_RATE_LIMIT_MAX,
+  DEFAULT_UPLOAD_RATE_LIMIT_WINDOW_MS,
   loadServerConfig,
   MIN_API_TOKEN_LENGTH,
   type ServerEnvironment,
 } from '../src/server.js';
 
 const VALID_TOKEN = 'a'.repeat(MIN_API_TOKEN_LENGTH);
+const INGESTION_TOKEN = 'b'.repeat(MIN_API_TOKEN_LENGTH);
 
 const environment = (overrides: ServerEnvironment = {}): ServerEnvironment => ({
-  HOME_GALLERY_API_TOKEN: VALID_TOKEN,
+  HOME_GALLERY_ADMIN_TOKEN: VALID_TOKEN,
+  HOME_GALLERY_INGESTION_TOKEN: INGESTION_TOKEN,
   HOME_GALLERY_DATA_DIR: '/srv/home-gallery/data',
   ...overrides,
 });
@@ -40,7 +46,18 @@ describe('loadServerConfig', () => {
     expect(loadServerConfig(environment())).toEqual({
       host: DEFAULT_SERVER_HOST,
       port: DEFAULT_SERVER_PORT,
-      apiToken: VALID_TOKEN,
+      administrationTokens: [VALID_TOKEN],
+      ingestionTokens: [INGESTION_TOKEN],
+      allowAdministrationUploads: false,
+      authenticationRateLimit: {
+        max: DEFAULT_AUTH_RATE_LIMIT_MAX,
+        windowMs: DEFAULT_AUTH_RATE_LIMIT_WINDOW_MS,
+      },
+      uploadRateLimit: {
+        max: DEFAULT_UPLOAD_RATE_LIMIT_MAX,
+        windowMs: DEFAULT_UPLOAD_RATE_LIMIT_WINDOW_MS,
+      },
+      trustedProxies: [],
       dataDirectory: '/srv/home-gallery/data',
       maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
       maxStoredFiles: DEFAULT_MAX_STORED_FILES,
@@ -56,6 +73,14 @@ describe('loadServerConfig', () => {
         environment({
           HOME_GALLERY_HOST: '127.0.0.1',
           HOME_GALLERY_PORT: '3012',
+          HOME_GALLERY_ADMIN_TOKEN_PREVIOUS: 'c'.repeat(32),
+          HOME_GALLERY_INGESTION_TOKEN_PREVIOUS: 'd'.repeat(32),
+          HOME_GALLERY_ALLOW_ADMIN_UPLOADS: 'true',
+          HOME_GALLERY_AUTH_RATE_LIMIT_MAX: '5',
+          HOME_GALLERY_AUTH_RATE_LIMIT_WINDOW_MS: '120000',
+          HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX: '8',
+          HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS: '30000',
+          HOME_GALLERY_TRUSTED_PROXIES: '127.0.0.1, 10.10.0.0/16',
           HOME_GALLERY_MAX_UPLOAD_BYTES: '1048576',
           HOME_GALLERY_MAX_STORED_FILES: '250',
           HOME_GALLERY_ALLOWED_ORIGINS:
@@ -67,6 +92,12 @@ describe('loadServerConfig', () => {
     ).toMatchObject({
       host: '127.0.0.1',
       port: 3012,
+      administrationTokens: [VALID_TOKEN, 'c'.repeat(32)],
+      ingestionTokens: [INGESTION_TOKEN, 'd'.repeat(32)],
+      allowAdministrationUploads: true,
+      authenticationRateLimit: { max: 5, windowMs: 120_000 },
+      uploadRateLimit: { max: 8, windowMs: 30_000 },
+      trustedProxies: ['127.0.0.1', '10.10.0.0/16'],
       maxUploadBytes: 1_048_576,
       maxStoredFiles: 250,
       allowedOrigins: ['http://gallery.local:3010', 'https://admin.local'],
@@ -84,7 +115,8 @@ describe('loadServerConfig', () => {
 
   it('reports every missing security-critical variable at once', () => {
     expect(issueVariables(() => loadServerConfig({}))).toEqual([
-      'HOME_GALLERY_API_TOKEN',
+      'HOME_GALLERY_ADMIN_TOKEN',
+      'HOME_GALLERY_INGESTION_TOKEN',
       'HOME_GALLERY_DATA_DIR',
     ]);
   });
@@ -102,16 +134,16 @@ describe('loadServerConfig', () => {
 
     expect(error).toBeInstanceOf(ConfigurationError);
     expect((error as ConfigurationError).message).toContain(
-      'HOME_GALLERY_API_TOKEN: Is required',
+      'HOME_GALLERY_ADMIN_TOKEN: Is required',
     );
   });
 
   it('treats a blank variable as missing', () => {
     expect(
       issueVariables(() =>
-        loadServerConfig(environment({ HOME_GALLERY_API_TOKEN: '   ' })),
+        loadServerConfig(environment({ HOME_GALLERY_ADMIN_TOKEN: '   ' })),
       ),
-    ).toEqual(['HOME_GALLERY_API_TOKEN']);
+    ).toEqual(['HOME_GALLERY_ADMIN_TOKEN']);
   });
 
   it('falls back to the default when an optional variable is blank', () => {
@@ -123,17 +155,59 @@ describe('loadServerConfig', () => {
   it('rejects a short api token', () => {
     expect(
       issueVariables(() =>
-        loadServerConfig(environment({ HOME_GALLERY_API_TOKEN: 'too-short' })),
+        loadServerConfig(
+          environment({ HOME_GALLERY_ADMIN_TOKEN: 'too-short' }),
+        ),
       ),
-    ).toEqual(['HOME_GALLERY_API_TOKEN']);
+    ).toEqual(['HOME_GALLERY_ADMIN_TOKEN']);
   });
 
   it('trims a token that arrives with a trailing newline', () => {
     expect(
       loadServerConfig(
-        environment({ HOME_GALLERY_API_TOKEN: `${VALID_TOKEN}\n` }),
-      ).apiToken,
-    ).toBe(VALID_TOKEN);
+        environment({ HOME_GALLERY_ADMIN_TOKEN: `${VALID_TOKEN}\n` }),
+      ).administrationTokens,
+    ).toEqual([VALID_TOKEN]);
+  });
+
+  it.each([
+    ['HOME_GALLERY_AUTH_RATE_LIMIT_MAX', '0'],
+    ['HOME_GALLERY_AUTH_RATE_LIMIT_WINDOW_MS', '999'],
+    ['HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX', '100001'],
+    ['HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS', '86400001'],
+    ['HOME_GALLERY_ALLOW_ADMIN_UPLOADS', 'yes'],
+  ] as const)(
+    'rejects invalid defense-in-depth variable %s',
+    (variable, value) => {
+      expect(
+        issueVariables(() =>
+          loadServerConfig(environment({ [variable]: value })),
+        ),
+      ).toEqual([variable]);
+    },
+  );
+
+  it.each(['all', '*', 'example.test', '10.0.0.0/33', '2001:db8::/129'])(
+    'rejects the invalid trusted proxy %j',
+    (trustedProxy) => {
+      expect(
+        issueVariables(() =>
+          loadServerConfig(
+            environment({ HOME_GALLERY_TRUSTED_PROXIES: trustedProxy }),
+          ),
+        ),
+      ).toEqual(['HOME_GALLERY_TRUSTED_PROXIES']);
+    },
+  );
+
+  it('accepts supported trusted proxy aliases and IPv6 ranges', () => {
+    expect(
+      loadServerConfig(
+        environment({
+          HOME_GALLERY_TRUSTED_PROXIES: 'loopback,uniquelocal,2001:db8::/64',
+        }),
+      ).trustedProxies,
+    ).toEqual(['loopback', 'uniquelocal', '2001:db8::/64']);
   });
 
   it.each(['0', '65536', '-1', '3012.5', 'http'])(

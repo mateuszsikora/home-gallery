@@ -36,7 +36,8 @@ The server reads its configuration from the environment and refuses to start whe
 
 ```bash
 npm run build
-HOME_GALLERY_API_TOKEN="$(openssl rand -hex 32)" \
+HOME_GALLERY_ADMIN_TOKEN="$(openssl rand -hex 32)" \
+HOME_GALLERY_INGESTION_TOKEN="$(openssl rand -hex 32)" \
 HOME_GALLERY_DATA_DIR=./data \
 npm run start --workspace @home-gallery/server
 ```
@@ -56,7 +57,7 @@ Open the Vite URL shown in the terminal. The API URL defaults to the gallery pag
 
 ### Running the administration application
 
-The administration application uses the same API URL and asks for the API bearer token in the browser. The token is kept in `sessionStorage`, is never included in a URL, and is removed when the studio is locked or the tab session ends.
+The administration application uses the same API URL and asks for the administration bearer token in the browser. The token is kept in `sessionStorage`, is never included in a URL, and is removed when the studio is locked or the tab session ends. Administration uploads are disabled by default so that credential cannot call the ingestion-only endpoint; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
 
 ```bash
 VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
@@ -67,13 +68,13 @@ When the API and administration application use different origins during local d
 
 ### Running the Telegram bot
 
-Create a bot with BotFather, obtain the numeric Telegram user IDs that may contribute, and configure the bot variables documented in `.env.example`. The bot and server use the same `HOME_GALLERY_API_TOKEN` value.
+Create a bot with BotFather, obtain the numeric Telegram user IDs that may contribute, and configure the bot variables documented in `.env.example`. The bot uses the ingestion credential and cannot call administration routes.
 
 ```bash
 HOME_GALLERY_TELEGRAM_BOT_TOKEN="<bot-token>" \
 HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS="123456789,987654321" \
 HOME_GALLERY_API_URL=http://localhost:3012 \
-HOME_GALLERY_API_TOKEN="<server-api-token>" \
+HOME_GALLERY_INGESTION_TOKEN="<server-ingestion-token>" \
 HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES=26214400 \
 npm run start --workspace @home-gallery/telegram-bot
 ```

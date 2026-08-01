@@ -122,9 +122,11 @@ Configurable options include slide duration, transition duration, playback mode,
 
 ### 10.2 REST API
 
-- Mutating and administrative operations use bearer-token authentication.
+- Ingestion and administrative operations use independently rotatable bearer-token credentials with separate scopes.
 - Administrative endpoints must not be publicly accessible.
 - Uploaded files must be treated as untrusted, validated, and verified before permanent storage.
+- Invalid authentication and excessive upload attempts must be bounded without limiting public gallery playback.
+- Forwarded client identity must be ignored unless the immediate proxy is explicitly trusted.
 
 ## 11. MVP completion
 

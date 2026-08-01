@@ -8,7 +8,7 @@ import { createTelegramBot } from '../src/runtime.js';
 const CONFIG: TelegramBotConfig = {
   botToken: '123456789:abcdefghijklmnopqrstuvwxyz',
   apiUrl: 'http://server:3012',
-  apiToken: '0123456789abcdef0123456789abcdef',
+  ingestionToken: '0123456789abcdef0123456789abcdef',
   allowedUserIds: new Set([123]),
   requestTimeoutMs: 30_000,
   maxDownloadBytes: 25 * 1024 * 1024,

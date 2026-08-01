@@ -4,13 +4,14 @@ The shared runtime schemas and TypeScript types live in `@home-gallery/shared-ty
 
 ## Conventions
 
-- Protected routes require `Authorization: Bearer <token>`. The token is never accepted in a URL.
+- Protected routes require `Authorization: Bearer <token>`. Administration and ingestion use independent credentials, and tokens are never accepted in a URL.
 - JSON requests use `Content-Type: application/json` and JSON responses use `Content-Type: application/json`.
 - Timestamps are ISO 8601 UTC strings.
 - Media IDs are UUIDs. Pagination cursors are opaque and clients must return them unchanged.
 - Normalized MVP media is served as `image/webp`.
 - A successful deletion returns `204 No Content`.
 - JSON responses are sent with `Cache-Control: no-store`; normalized image bytes are immutable and are sent with a long-lived `Cache-Control` and an `ETag`.
+- Rate-limited requests return HTTP `429`, error code `rate_limited`, and a `Retry-After` header in seconds. Public health, playlist, and content requests do not consume authentication or upload limits.
 
 Every non-successful response uses this shape:
 
@@ -36,15 +37,15 @@ Every non-successful response uses this shape:
 | Method   | Path              | Access | Request                             | Successful response                |
 | -------- | ----------------- | ------ | ----------------------------------- | ---------------------------------- |
 | `GET`    | `/health`         | Public | None                                | Health status                      |
-| `POST`   | `/api/media`      | Bearer | Multipart image and attribution     | Media record                       |
-| `GET`    | `/api/media`      | Bearer | Optional `cursor` and `limit` query | Paginated media list               |
-| `GET`    | `/api/media/{id}` | Bearer | None                                | Media record                       |
-| `PATCH`  | `/api/media/{id}` | Bearer | Non-empty media update              | Updated media record               |
-| `DELETE` | `/api/media/{id}` | Bearer | None                                | `204 No Content`                   |
+| `POST`   | `/api/media`      | Ingest | Multipart image and attribution     | Media record                       |
+| `GET`    | `/api/media`      | Admin  | Optional `cursor` and `limit` query | Paginated media list               |
+| `GET`    | `/api/media/{id}` | Admin  | None                                | Media record                       |
+| `PATCH`  | `/api/media/{id}` | Admin  | Non-empty media update              | Updated media record               |
+| `DELETE` | `/api/media/{id}` | Admin  | None                                | `204 No Content`                   |
 | `GET`    | `/api/playlist`   | Public | None                                | Enabled media and gallery settings |
 | `GET`    | `/media/{id}`     | Public | None                                | Normalized image bytes             |
-| `GET`    | `/api/settings`   | Bearer | None                                | Gallery settings                   |
-| `PATCH`  | `/api/settings`   | Bearer | Non-empty settings update           | Updated gallery settings           |
+| `GET`    | `/api/settings`   | Admin  | None                                | Gallery settings                   |
+| `PATCH`  | `/api/settings`   | Admin  | Non-empty settings update           | Updated gallery settings           |
 
 ### Health
 
@@ -61,6 +62,8 @@ The healthy response uses HTTP `200`. If the database readiness probe fails, the
 ### Upload media
 
 `POST /api/media` uses `multipart/form-data` with these fields:
+
+The ingestion credential is required. An administration credential is accepted only when the operator explicitly enables administration uploads.
 
 | Field              | Required | Description                                                           |
 | ------------------ | -------- | --------------------------------------------------------------------- |

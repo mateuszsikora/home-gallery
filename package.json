@@ -19,6 +19,7 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:compose": "bash scripts/compose-smoke.sh",
+    "test:tls-config": "bash scripts/tls-config-smoke.sh",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
