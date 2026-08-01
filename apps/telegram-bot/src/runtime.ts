@@ -14,7 +14,7 @@ import {
 } from './logger.js';
 
 export interface RunningTelegramBot {
-  launch(): Promise<void>;
+  launch(onReady?: () => void): Promise<void>;
   stop(reason?: string): void;
 }
 
@@ -117,9 +117,11 @@ export const createTelegramBot = (
   });
 
   return {
-    launch: async () => {
-      await bot.launch({ allowedUpdates: ['message'] });
-      logger.info({}, 'Telegram bot started');
+    launch: async (onReady) => {
+      await bot.launch({ allowedUpdates: ['message'] }, () => {
+        onReady?.();
+        logger.info({}, 'Telegram bot started');
+      });
     },
     stop: (reason) => {
       bot.stop(reason);

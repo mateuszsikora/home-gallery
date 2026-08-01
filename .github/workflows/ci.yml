@@ -47,3 +47,204 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  deployment-smoke:
+    name: Compose startup, persistence, backup, and restore
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate and exercise the Compose stack
+        run: bash scripts/compose-smoke.sh
+
+  build-images:
+    name: Build and publish ${{ matrix.target }} image
+    needs: [checks, deployment-smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: server
+            image: home-gallery-server
+          - target: gallery
+            image: home-gallery-gallery
+          - target: admin
+            image: home-gallery-admin
+          - target: telegram-bot
+            image: home-gallery-telegram-bot
+    env:
+      DOCKER_METADATA_SHORT_SHA_LENGTH: 12
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create image metadata
+        id: metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and publish linux/amd64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: BUILD_VERSION=sha-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  deploy:
+    name: Deploy Home Gallery over Tailscale
+    needs: build-images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: home-gallery-deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.HOME_GALLERY_TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.HOME_GALLERY_TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Configure SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.HOME_GALLERY_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/home_gallery_ed25519
+          chmod 600 ~/.ssh/home_gallery_ed25519
+
+      - name: Discover the deployment directory
+        id: remote
+        env:
+          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          REMOTE_HOME=$(ssh -i ~/.ssh/home_gallery_ed25519 \
+            -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'printf %s "$HOME"')
+          test -n "$REMOTE_HOME"
+          echo "directory=$REMOTE_HOME/home-gallery/infra" >> "$GITHUB_OUTPUT"
+
+      - name: Log the deployment host in to GHCR
+        env:
+          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/home_gallery_ed25519 \
+            -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login ghcr.io --username '$GHCR_USER' --password-stdin"
+
+      - name: Sync deployment files
+        env:
+          DEPLOY_DIR: ${{ steps.remote.outputs.directory }}
+          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          rsync -az \
+            -e "ssh -i ~/.ssh/home_gallery_ed25519 -o StrictHostKeyChecking=accept-new" \
+            --rsync-path="mkdir -p '$DEPLOY_DIR' && rsync" \
+            docker-compose.yml \
+            .env.example \
+            infra/deploy.sh \
+            infra/backup.sh \
+            infra/restore.sh \
+            docs/DEPLOYMENT.md \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/"
+
+      - name: Install runtime configuration
+        env:
+          API_TOKEN: ${{ secrets.HOME_GALLERY_API_TOKEN }}
+          BOT_TOKEN: ${{ secrets.HOME_GALLERY_TELEGRAM_BOT_TOKEN }}
+          ALLOWED_USER_IDS: ${{ secrets.HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS }}
+          GALLERY_PORT: ${{ vars.HOME_GALLERY_GALLERY_PORT || '3010' }}
+          ADMIN_PORT: ${{ vars.HOME_GALLERY_ADMIN_PORT || '3011' }}
+          API_PORT: ${{ vars.HOME_GALLERY_API_PORT || '3012' }}
+          DEPLOY_DIR: ${{ steps.remote.outputs.directory }}
+          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$API_TOKEN"
+          test -n "$BOT_TOKEN"
+          test -n "$ALLOWED_USER_IDS"
+          ENV_PATH=$(mktemp)
+          chmod 600 "$ENV_PATH"
+          {
+            printf 'HOME_GALLERY_IMAGE_TAG=sha-%s\n' "${GITHUB_SHA::12}"
+            printf 'HOME_GALLERY_GALLERY_PORT=%s\n' "$GALLERY_PORT"
+            printf 'HOME_GALLERY_ADMIN_PORT=%s\n' "$ADMIN_PORT"
+            printf 'HOME_GALLERY_API_PORT=%s\n' "$API_PORT"
+            printf 'HOME_GALLERY_BACKUP_DIR=%s/backups\n' "$DEPLOY_DIR"
+            printf 'HOME_GALLERY_API_TOKEN=%s\n' "$API_TOKEN"
+            printf 'HOME_GALLERY_MAX_UPLOAD_BYTES=26214400\n'
+            printf 'HOME_GALLERY_MAX_STORED_FILES=5000\n'
+            printf 'HOME_GALLERY_ALLOWED_ORIGINS=\n'
+            printf 'HOME_GALLERY_LOG_LEVEL=info\n'
+            printf 'HOME_GALLERY_TELEGRAM_BOT_TOKEN=%s\n' "$BOT_TOKEN"
+            printf 'HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS=%s\n' "$ALLOWED_USER_IDS"
+            printf 'HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS=30000\n'
+          } > "$ENV_PATH"
+          rsync -az \
+            -e "ssh -i ~/.ssh/home_gallery_ed25519 -o StrictHostKeyChecking=accept-new" \
+            "$ENV_PATH" "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/.env"
+          rm -f "$ENV_PATH"
+          ssh -i ~/.ssh/home_gallery_ed25519 \
+            -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_DIR/.env'"
+
+      - name: Deploy and verify health
+        env:
+          DEPLOY_DIR: ${{ steps.remote.outputs.directory }}
+          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/home_gallery_ed25519 \
+            -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "HOME_GALLERY_DEPLOY_DIR='$DEPLOY_DIR' bash '$DEPLOY_DIR/deploy.sh'"
