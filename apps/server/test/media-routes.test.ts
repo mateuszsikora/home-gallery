@@ -11,7 +11,7 @@ import type {
   InjectOptions,
   LightMyRequestResponse,
 } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import {
@@ -346,6 +346,23 @@ describe('media management routes', () => {
 
       expect(response.statusCode).toBe(204);
       expect(app.mediaRepository.findById(record.id)).toBeUndefined();
+    });
+
+    it('restores the file when the database delete fails', async () => {
+      const { record } = await storeTestMedia(app);
+      vi.spyOn(app.mediaRepository, 'delete').mockImplementation(() => {
+        throw new Error('simulated database failure');
+      });
+
+      const response = await authenticated(
+        'DELETE',
+        API_ROUTES.mediaById(record.id),
+      );
+
+      expect(response.statusCode).toBe(500);
+      expect(app.mediaRepository.findById(record.id)).toEqual(record);
+      expect(await app.mediaStorage.exists(record.storedFilename)).toBe(true);
+      expect(await readdir(app.mediaStorage.temporaryDirectory)).toEqual([]);
     });
 
     it('requires a bearer token', async () => {

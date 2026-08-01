@@ -66,7 +66,7 @@ describe('health route', () => {
       url: API_ROUTES.health,
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(503);
     expect(healthResponseSchema.parse(response.json()).status).toBe('degraded');
   });
 

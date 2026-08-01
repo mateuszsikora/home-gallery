@@ -2,7 +2,7 @@
 
 Home Gallery is a self-hosted application for collecting photos through Telegram and displaying them as a fullscreen browser slideshow. It also provides a web administration interface for managing the local media library.
 
-The project is under active development. The product requirements are in [docs/SPECIFICATION.md](docs/SPECIFICATION.md), the delivery sequence is in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), and execution is tracked in the [GitHub issue backlog](https://github.com/mateuszsikora/home-gallery/issues).
+The project is under active development. The product requirements are in [docs/SPECIFICATION.md](docs/SPECIFICATION.md), the delivery sequence is in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), and execution is tracked in the [GitHub issue backlog](https://github.com/mateuszsikora/home-gallery/issues). The integrated MVP evidence and security review are in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 The MVP HTTP routes and representative payloads are documented in [docs/API.md](docs/API.md).
 
@@ -74,10 +74,11 @@ HOME_GALLERY_TELEGRAM_BOT_TOKEN="<bot-token>" \
 HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS="123456789,987654321" \
 HOME_GALLERY_API_URL=http://localhost:3012 \
 HOME_GALLERY_API_TOKEN="<server-api-token>" \
+HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES=26214400 \
 npm run start --workspace @home-gallery/telegram-bot
 ```
 
-Allowed users can send Telegram photo messages or JPEG, PNG, WebP, HEIC, and HEIF image documents. The bot chooses the largest available Telegram photo, uploads it with contributor attribution, and deletes the source message only after Home Gallery confirms storage. Unsupported or unauthorized submissions are not downloaded. Failed uploads remain in the chat and receive a status reply so they can be retried.
+Allowed users can send Telegram photo messages or JPEG, PNG, WebP, HEIC, and HEIF image documents. The bot chooses the largest available Telegram photo, enforces its download limit while streaming the response, uploads it with contributor attribution, and deletes the source message only after Home Gallery confirms storage. Keep the bot download limit at or below the server upload limit. Unsupported, oversized, or unauthorized submissions are not uploaded. Failed uploads remain in the chat and receive a status reply so they can be retried.
 
 ## Agent-driven development
 

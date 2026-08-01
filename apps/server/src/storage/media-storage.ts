@@ -82,6 +82,12 @@ export interface OpenMediaFile {
   readonly stream: Readable;
 }
 
+/** A stored file moved out of public view while its database row is deleted. */
+export interface StagedMediaRemoval {
+  commit(): Promise<void>;
+  restore(): Promise<void>;
+}
+
 export interface MediaStorage {
   readonly rootDirectory: string;
   readonly mediaDirectory: string;
@@ -92,6 +98,7 @@ export interface MediaStorage {
   exists(storedFilename: string): Promise<boolean>;
   openForRead(storedFilename: string): Promise<OpenMediaFile | undefined>;
   remove(storedFilename: string): Promise<boolean>;
+  stageRemoval(storedFilename: string): Promise<StagedMediaRemoval | undefined>;
   pruneTemporaryFiles(): Promise<number>;
 }
 
@@ -222,6 +229,56 @@ export const createMediaStorage = (rootDirectory: string): MediaStorage => {
 
         throw error;
       }
+    },
+
+    stageRemoval: async (storedFilename) => {
+      const source = resolveMediaPath(storedFilename);
+      const stagedPath = join(temporaryDirectory, `${randomUUID()}.delete`);
+
+      try {
+        await rename(source, stagedPath);
+      } catch (error) {
+        if (isMissingFileError(error)) {
+          return undefined;
+        }
+
+        throw error;
+      }
+
+      try {
+        await Promise.all([
+          syncDirectory(mediaDirectory),
+          syncDirectory(temporaryDirectory),
+        ]);
+      } catch (error) {
+        await rename(stagedPath, source);
+        throw error;
+      }
+      let settled = false;
+
+      return {
+        commit: async () => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          await unlink(stagedPath);
+          await syncDirectory(temporaryDirectory);
+        },
+        restore: async () => {
+          if (settled) {
+            return;
+          }
+
+          await rename(stagedPath, source);
+          settled = true;
+          await Promise.all([
+            syncDirectory(mediaDirectory),
+            syncDirectory(temporaryDirectory),
+          ]);
+        },
+      };
     },
 
     /** Removes leftovers from uploads interrupted by a crash or restart. */

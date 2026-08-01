@@ -84,6 +84,26 @@ describe('server application', () => {
     expect(app.database.open).toBe(false);
   });
 
+  it('adds defensive headers to direct API responses', async () => {
+    const app = await createApp(createTestConfig(dataDirectory));
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: API_ROUTES.health,
+      });
+
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
+      expect(response.headers['referrer-policy']).toBe('no-referrer');
+      expect(response.headers['x-frame-options']).toBe('DENY');
+      expect(response.headers['permissions-policy']).toBe(
+        'camera=(), geolocation=(), microphone=()',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   describe('CORS policy', () => {
     const requestWithOrigin = async (
       allowedOrigins: readonly string[],

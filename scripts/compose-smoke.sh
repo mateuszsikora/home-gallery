@@ -64,6 +64,9 @@ curl --fail --silent --show-error "http://127.0.0.1:$HOME_GALLERY_API_PORT/healt
   grep -q '"status":"ok"'
 curl --fail --silent --show-error "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/" |
   grep -q '<title>Home Gallery</title>'
+curl --fail --silent --show-error --head \
+  "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/" |
+  grep -qi '^content-security-policy:'
 curl --fail --silent --show-error "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/" |
   grep -q '<title>Home Gallery Admin</title>'
 
@@ -86,11 +89,48 @@ fi
 curl --fail --silent --show-error \
   "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/api/playlist" |
   grep -q "$MEDIA_ID"
+ADMIN_MEDIA_RESPONSE=$(curl --fail --silent --show-error \
+  --header "Authorization: Bearer $API_TOKEN" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media")
+if ! grep -q "$MEDIA_ID" <<<"$ADMIN_MEDIA_RESPONSE"; then
+  echo "ERROR: Uploaded media was not visible through the admin API proxy." >&2
+  exit 1
+fi
+UNAUTHORIZED_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media")
+if [[ "$UNAUTHORIZED_STATUS" != "401" ]]; then
+  echo "ERROR: Admin API proxy returned $UNAUTHORIZED_STATUS without a token." >&2
+  exit 1
+fi
+curl --fail --silent --show-error \
+  --request PATCH \
+  --header "Authorization: Bearer $API_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"slideDurationMs":2500}' \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/settings" |
+  grep -q '"slideDurationMs":2500'
+curl --fail --silent --show-error \
+  "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/api/playlist" |
+  grep -q '"slideDurationMs":2500'
 curl --fail --silent --show-error \
   --output /dev/null \
   "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/media/$MEDIA_ID"
 
-dc restart server
+if [[ "${HOME_GALLERY_SMOKE_REPORT_RESOURCES:-0}" == "1" ]]; then
+  echo "Idle container resource snapshot:"
+  RESOURCE_CONTAINERS=($(dc ps --quiet server gallery admin))
+  docker stats --no-stream \
+    --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' \
+    "${RESOURCE_CONTAINERS[@]}"
+fi
+
+dc stop --timeout 15 server
+SERVER_CONTAINER_ID=$(dc ps --all --quiet server)
+SERVER_EXIT_CODE=$(docker inspect --format '{{.State.ExitCode}}' "$SERVER_CONTAINER_ID")
+if [[ "$SERVER_EXIT_CODE" != "0" ]]; then
+  echo "ERROR: Server exited with $SERVER_EXIT_CODE after SIGTERM." >&2
+  exit 1
+fi
 dc up -d --wait --wait-timeout 120 server
 curl --fail --silent --show-error \
   "http://127.0.0.1:$HOME_GALLERY_API_PORT/api/playlist" |
@@ -112,5 +152,9 @@ curl --fail --silent --show-error \
 curl --fail --silent --show-error \
   --output /dev/null \
   "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/media/$MEDIA_ID"
+curl --fail --silent --show-error \
+  --header "Authorization: Bearer $API_TOKEN" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media" |
+  grep -q "$MEDIA_ID"
 
-echo "Compose startup, persistence, backup, and restore smoke test passed."
+echo "Compose MVP integration, graceful shutdown, persistence, backup, and restore smoke test passed."

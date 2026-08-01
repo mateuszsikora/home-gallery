@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ConfigurationError } from '../src/errors.js';
 import {
+  DEFAULT_TELEGRAM_MAX_DOWNLOAD_BYTES,
   DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS,
   loadTelegramBotConfig,
   type TelegramBotEnvironment,
@@ -43,6 +44,7 @@ describe('loadTelegramBotConfig', () => {
       apiUrl: 'http://home-gallery-server:3012',
       apiToken: API_TOKEN,
       requestTimeoutMs: DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS,
+      maxDownloadBytes: DEFAULT_TELEGRAM_MAX_DOWNLOAD_BYTES,
     });
     expect([...config.allowedUserIds]).toEqual([123, 456]);
   });
@@ -53,12 +55,14 @@ describe('loadTelegramBotConfig', () => {
         HOME_GALLERY_API_URL: 'https://gallery.example.test/',
         HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS: ' 123, 456,123 ',
         HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS: '15000',
+        HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES: '1048576',
       }),
     );
 
     expect(config.apiUrl).toBe('https://gallery.example.test');
     expect([...config.allowedUserIds]).toEqual([123, 456]);
     expect(config.requestTimeoutMs).toBe(15_000);
+    expect(config.maxDownloadBytes).toBe(1_048_576);
   });
 
   it('reports every missing security-critical variable', () => {
@@ -80,6 +84,8 @@ describe('loadTelegramBotConfig', () => {
     ['HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS', '0'],
     ['HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS', '999'],
     ['HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS', '120001'],
+    ['HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES', '1023'],
+    ['HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES', '1073741825'],
   ] as const)('rejects invalid %s values', (variable, value) => {
     expect(
       issueVariables(() =>

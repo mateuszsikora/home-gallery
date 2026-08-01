@@ -61,6 +61,7 @@ export const createTelegramBot = (
     fetch: timeoutFetch(config.requestTimeoutMs),
     logger,
     requestTimeoutMs: config.requestTimeoutMs,
+    maxDownloadBytes: config.maxDownloadBytes,
     secrets,
   });
 

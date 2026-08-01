@@ -30,6 +30,7 @@ Replace every placeholder in `.env`:
 - generate `HOME_GALLERY_API_TOKEN` with `openssl rand -hex 32`;
 - set the token returned by BotFather as `HOME_GALLERY_TELEGRAM_BOT_TOKEN`;
 - set `HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS` to a comma-separated allowlist of numeric Telegram user IDs;
+- keep `HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES` at or below `HOME_GALLERY_MAX_UPLOAD_BYTES` so the bot rejects oversized responses before buffering them for upload;
 - keep the default host ports or choose unused alternatives;
 - use an absolute `HOME_GALLERY_BACKUP_DIR` on production hosts.
 
@@ -102,7 +103,18 @@ docker compose --project-name home-gallery --env-file .env logs --tail 100 serve
 docker compose --project-name home-gallery --env-file .env logs --tail 100 telegram-bot
 ```
 
-Startup fails early when required secrets, Telegram IDs, ports, upload limits, or origins are invalid. The API health check also verifies database access. A web container is healthy only when it can reach the API through the private network.
+Startup fails early when required secrets, Telegram IDs, ports, upload and download limits, or origins are invalid. The API health endpoint returns `503` with a `degraded` body when its database probe fails, so Compose marks the server and dependent web containers unhealthy. A web container is healthy only when it can reach the API through the private network.
+
+## Security boundaries
+
+- Treat the default HTTP endpoints as trusted-LAN services. Put a TLS reverse proxy or authenticated private network in front of them before crossing an untrusted network; the administration bearer token is otherwise sent in cleartext over HTTP.
+- The empty CORS allowlist is the production default because gallery and administration traffic is same-origin through nginx. Use explicit origins for split-origin development. `*` is an intentional escape hatch and should not be used for an exposed deployment.
+- The API rejects missing or invalid bearer tokens before reading upload bodies. It validates multipart counts and sizes, verifies image bytes, limits decoded pixels, applies EXIF orientation, and stores only normalized WebP files with server-generated names.
+- Telegram authorization occurs before file lookup or download. Both declared and streamed download sizes are bounded, and secrets are redacted from bot and API error logs.
+- Containers run without added Linux capabilities, with read-only root filesystems and `no-new-privileges`. The web applications send a restrictive Content Security Policy and other defensive browser headers.
+- Keep `.env` at mode `600`, rotate both bot and API tokens after suspected disclosure, and never paste them into issue, pull request, or diagnostic output.
+
+The complete authorization, input, dependency, recovery, and MVP review is recorded in [VALIDATION.md](VALIDATION.md).
 
 ## Persistent data
 
@@ -163,6 +175,8 @@ After every restore test:
 5. retain the pre-restore safety archive until the result is accepted.
 
 The repository automates this sequence with `npm run test:compose`: it starts an isolated test project, uploads an image, restarts the stack, backs it up, deletes it, restores it, and verifies metadata and bytes. The test project and volume are removed on completion.
+
+The smoke test also verifies that the upload is visible through the gallery and administration proxies, rejects an unauthenticated administration request, updates settings through the administration proxy, and confirms a clean server exit after `SIGTERM`. Set `HOME_GALLERY_SMOKE_REPORT_RESOURCES=1` to include an idle CPU and memory snapshot in its output.
 
 ## Upgrade and rollback
 

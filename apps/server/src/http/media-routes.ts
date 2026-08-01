@@ -144,11 +144,28 @@ export const registerMediaRoutes = (app: FastifyInstance): void => {
     async (request, reply) => {
       const record = requireMedia(app, request.params.id);
 
-      // The bytes go first: if the metadata delete then fails, the caller sees
-      // a record it can delete again, which is recoverable. The opposite order
-      // would leave a deleted photo on disk with nothing left to point at it.
-      await app.mediaStorage.remove(record.storedFilename);
-      app.mediaRepository.delete(record.id);
+      // Hide the bytes with an atomic rename, then restore them if the database
+      // write fails. Once the row is gone, failure to purge the staged file is
+      // only a temporary orphan and startup cleanup removes it safely.
+      const stagedRemoval = await app.mediaStorage.stageRemoval(
+        record.storedFilename,
+      );
+
+      try {
+        app.mediaRepository.delete(record.id);
+      } catch (error) {
+        await stagedRemoval?.restore();
+        throw error;
+      }
+
+      try {
+        await stagedRemoval?.commit();
+      } catch (error) {
+        request.log.warn(
+          { err: error, mediaId: record.id },
+          'Deleted media left a temporary file for startup cleanup',
+        );
+      }
 
       return reply
         .status(204)

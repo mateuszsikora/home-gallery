@@ -11,6 +11,7 @@ const CONFIG: TelegramBotConfig = {
   apiToken: '0123456789abcdef0123456789abcdef',
   allowedUserIds: new Set([123]),
   requestTimeoutMs: 30_000,
+  maxDownloadBytes: 25 * 1024 * 1024,
 };
 
 describe('Telegram runtime readiness', () => {
