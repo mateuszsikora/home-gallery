@@ -47,11 +47,19 @@ export interface TelegramIngestionOptions {
   fetch?: typeof globalThis.fetch;
   logger: BotLogger;
   requestTimeoutMs: number;
+  maxDownloadBytes: number;
   secrets?: readonly string[];
 }
 
 export type TelegramIngestionResult =
   'rejected' | 'unsupported' | 'uploaded' | 'failed';
+
+export class TelegramDownloadLimitError extends Error {
+  constructor(maxDownloadBytes: number) {
+    super(`Telegram media exceeds the ${maxDownloadBytes} byte download limit`);
+    this.name = 'TelegramDownloadLimitError';
+  }
+}
 
 interface SelectedMedia {
   fileId: string;
@@ -175,6 +183,61 @@ export const withTimeout = async <Value>(
   }
 };
 
+/**
+ * Reads Telegram media without allowing an absent or dishonest Content-Length
+ * header to make the bot buffer an unbounded response in memory.
+ */
+const readDownloadedMedia = async (
+  response: Response,
+  maxDownloadBytes: number,
+): Promise<ArrayBuffer> => {
+  const contentLength = response.headers.get('content-length');
+
+  if (contentLength !== null) {
+    const declaredLength = Number(contentLength);
+
+    if (Number.isFinite(declaredLength) && declaredLength > maxDownloadBytes) {
+      await response.body?.cancel();
+      throw new TelegramDownloadLimitError(maxDownloadBytes);
+    }
+  }
+
+  if (response.body === null) {
+    return new ArrayBuffer(0);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      receivedBytes += value.byteLength;
+
+      if (receivedBytes > maxDownloadBytes) {
+        await reader.cancel();
+        throw new TelegramDownloadLimitError(maxDownloadBytes);
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+};
+
 const attemptReply = async (
   options: TelegramIngestionOptions,
   message: TelegramMediaMessage,
@@ -254,7 +317,7 @@ export const createTelegramIngestionHandler = (
       }
 
       const bytes = await withTimeout(
-        () => response.arrayBuffer(),
+        () => readDownloadedMedia(response, options.maxDownloadBytes),
         options.requestTimeoutMs,
         'Telegram file read',
       );

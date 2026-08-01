@@ -86,6 +86,7 @@ const createHarness = () => {
     fetch: fetchMock as unknown as typeof globalThis.fetch,
     logger,
     requestTimeoutMs: 100,
+    maxDownloadBytes: 1_024,
   });
 
   return {
@@ -231,6 +232,7 @@ describe('Telegram media ingestion', () => {
       fetch: harness.fetchMock as unknown as typeof globalThis.fetch,
       logger: harness.logger,
       requestTimeoutMs: 1_000,
+      maxDownloadBytes: 1_024,
     });
 
     const result = handler(PHOTO_MESSAGE);
@@ -255,6 +257,7 @@ describe('Telegram media ingestion', () => {
       fetch: harness.fetchMock as unknown as typeof globalThis.fetch,
       logger: harness.logger,
       requestTimeoutMs: 1_000,
+      maxDownloadBytes: 1_024,
     });
 
     const result = handler(PHOTO_MESSAGE);
@@ -280,6 +283,7 @@ describe('Telegram media ingestion', () => {
       fetch: harness.fetchMock as unknown as typeof globalThis.fetch,
       logger: harness.logger,
       requestTimeoutMs: 100,
+      maxDownloadBytes: 1_024,
       secrets: [botToken, apiToken],
     });
 
@@ -289,5 +293,39 @@ describe('Telegram media ingestion', () => {
     expect(output).not.toContain(botToken);
     expect(output).not.toContain(apiToken);
     expect(output).toContain('[REDACTED]');
+  });
+
+  it('rejects a Telegram response whose declared size exceeds the limit', async () => {
+    const harness = createHarness();
+    harness.fetchMock.mockResolvedValueOnce(
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { 'content-length': '2048' },
+      }),
+    );
+
+    await expect(harness.handler(PHOTO_MESSAGE)).resolves.toBe('failed');
+
+    expect(harness.uploadMedia).not.toHaveBeenCalled();
+    expect(harness.deleteMessage).not.toHaveBeenCalled();
+    expect(harness.reply).toHaveBeenCalledOnce();
+  });
+
+  it('stops reading a Telegram response that streams beyond the limit', async () => {
+    const harness = createHarness();
+    harness.fetchMock.mockResolvedValueOnce(
+      new Response(new Uint8Array(1_025)),
+    );
+
+    await expect(harness.handler(PHOTO_MESSAGE)).resolves.toBe('failed');
+
+    expect(harness.uploadMedia).not.toHaveBeenCalled();
+    expect(harness.deleteMessage).not.toHaveBeenCalled();
+    expect(harness.logs).toContainEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({
+          errorName: 'TelegramDownloadLimitError',
+        }),
+      }),
+    );
   });
 });

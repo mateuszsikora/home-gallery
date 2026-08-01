@@ -2,9 +2,7 @@ import { ConfigurationError, loadServerConfig } from '@home-gallery/config';
 import type { FastifyInstance } from 'fastify';
 
 import { createApp } from './app.js';
-
-/** Time allowed for in-flight requests before the process is forced down. */
-const SHUTDOWN_TIMEOUT_MS = 10_000;
+import { shutdownApp } from './shutdown.js';
 
 const registerShutdownHandlers = (app: FastifyInstance): void => {
   let shuttingDown = false;
@@ -15,24 +13,7 @@ const registerShutdownHandlers = (app: FastifyInstance): void => {
     }
 
     shuttingDown = true;
-    app.log.info({ signal }, 'Shutting down');
-
-    const timeout = setTimeout(() => {
-      app.log.error('Shutdown timed out, exiting immediately');
-      process.exit(1);
-    }, SHUTDOWN_TIMEOUT_MS);
-    timeout.unref();
-
-    app.close().then(
-      () => {
-        clearTimeout(timeout);
-        process.exit(0);
-      },
-      (error: unknown) => {
-        app.log.error({ err: error }, 'Shutdown failed');
-        process.exit(1);
-      },
-    );
+    void shutdownApp(app, signal).then((exitCode) => process.exit(exitCode));
   };
 
   process.once('SIGTERM', shutdown);

@@ -1,11 +1,18 @@
 import { z } from 'zod';
 
 import { ConfigurationError, type ConfigurationIssue } from './errors.js';
-import { MAX_API_TOKEN_LENGTH, MIN_API_TOKEN_LENGTH } from './server.js';
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  MAX_API_TOKEN_LENGTH,
+  MAX_MAX_UPLOAD_BYTES,
+  MIN_API_TOKEN_LENGTH,
+  MIN_MAX_UPLOAD_BYTES,
+} from './server.js';
 
 export const DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS = 30_000;
 export const MIN_TELEGRAM_REQUEST_TIMEOUT_MS = 1_000;
 export const MAX_TELEGRAM_REQUEST_TIMEOUT_MS = 120_000;
+export const DEFAULT_TELEGRAM_MAX_DOWNLOAD_BYTES = DEFAULT_MAX_UPLOAD_BYTES;
 
 export interface TelegramBotConfig {
   botToken: string;
@@ -13,6 +20,7 @@ export interface TelegramBotConfig {
   apiToken: string;
   allowedUserIds: ReadonlySet<number>;
   requestTimeoutMs: number;
+  maxDownloadBytes: number;
 }
 
 const requiredString = z.string().trim().min(1, 'Must not be empty');
@@ -105,12 +113,20 @@ const requestTimeoutSchema = z
       .max(MAX_TELEGRAM_REQUEST_TIMEOUT_MS),
   );
 
+const maxDownloadBytesSchema = z
+  .string()
+  .trim()
+  .regex(/^\d+$/u, 'Must be an integer')
+  .transform((value) => Number(value))
+  .pipe(z.int().min(MIN_MAX_UPLOAD_BYTES).max(MAX_MAX_UPLOAD_BYTES));
+
 const telegramBotEnvSchema = z.object({
   HOME_GALLERY_TELEGRAM_BOT_TOKEN: botTokenSchema,
   HOME_GALLERY_API_URL: apiUrlSchema,
   HOME_GALLERY_API_TOKEN: apiTokenSchema,
   HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS: allowedUserIdsSchema,
   HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS: requestTimeoutSchema.optional(),
+  HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES: maxDownloadBytesSchema.optional(),
 });
 
 export type TelegramBotEnvironment = Readonly<
@@ -167,5 +183,8 @@ export const loadTelegramBotConfig = (
     requestTimeoutMs:
       parsed.data.HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS ??
       DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS,
+    maxDownloadBytes:
+      parsed.data.HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES ??
+      DEFAULT_TELEGRAM_MAX_DOWNLOAD_BYTES,
   };
 };

@@ -147,6 +147,35 @@ describe('media storage', () => {
     expect(await storage.remove('removable.webp')).toBe(false);
   });
 
+  it('stages a removal that can be restored after a database failure', async () => {
+    const temporary = await storage.createTemporaryFile();
+    await writeFile(temporary.path, 'image-bytes');
+    await temporary.commit('restored.webp');
+
+    const staged = await storage.stageRemoval('restored.webp');
+
+    expect(staged).toBeDefined();
+    expect(await storage.exists('restored.webp')).toBe(false);
+    expect(await readdir(storage.temporaryDirectory)).toHaveLength(1);
+
+    await staged?.restore();
+
+    expect(await storage.exists('restored.webp')).toBe(true);
+    expect(await readdir(storage.temporaryDirectory)).toEqual([]);
+  });
+
+  it('commits a staged removal without leaving a temporary file', async () => {
+    const temporary = await storage.createTemporaryFile();
+    await writeFile(temporary.path, 'image-bytes');
+    await temporary.commit('deleted.webp');
+
+    const staged = await storage.stageRemoval('deleted.webp');
+    await staged?.commit();
+
+    expect(await storage.exists('deleted.webp')).toBe(false);
+    expect(await readdir(storage.temporaryDirectory)).toEqual([]);
+  });
+
   it('prunes leftovers from interrupted uploads', async () => {
     const first = await storage.createTemporaryFile();
     const second = await storage.createTemporaryFile();

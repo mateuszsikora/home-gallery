@@ -56,6 +56,8 @@ Every non-successful response uses this shape:
 }
 ```
 
+The healthy response uses HTTP `200`. If the database readiness probe fails, the route returns HTTP `503` with `status` set to `degraded`; clients should use both the status code and response body for diagnostics.
+
 ### Upload media
 
 `POST /api/media` uses `multipart/form-data` with these fields:

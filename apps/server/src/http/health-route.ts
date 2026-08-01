@@ -12,8 +12,8 @@ export interface HealthRouteOptions {
 
 /**
  * Liveness and readiness in one public route: the process answering at all is
- * liveness, and `degraded` reports that the metadata database is unusable.
- * The status always comes back as 200 so clients read the state from the body.
+ * liveness, while a `503` and `degraded` body report that the metadata database
+ * is unusable. Container health checks can therefore rely on the HTTP status.
  */
 export const registerHealthRoute = (
   app: FastifyInstance,
@@ -23,7 +23,7 @@ export const registerHealthRoute = (
   const now = options.now ?? Date.now;
   const probe = database.prepare('SELECT 1');
 
-  app.get(API_ROUTES.health, async (request): Promise<HealthResponse> => {
+  app.get(API_ROUTES.health, async (request, reply) => {
     let status: HealthResponse['status'] = 'ok';
 
     try {
@@ -33,10 +33,12 @@ export const registerHealthRoute = (
       status = 'degraded';
     }
 
-    return {
+    const response: HealthResponse = {
       status,
       version,
       uptimeSeconds: Math.max(0, Math.floor((now() - startedAt) / 1000)),
     };
+
+    return reply.status(status === 'ok' ? 200 : 503).send(response);
   });
 };

@@ -228,6 +228,7 @@ jobs:
             printf 'HOME_GALLERY_TELEGRAM_BOT_TOKEN=%s\n' "$BOT_TOKEN"
             printf 'HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS=%s\n' "$ALLOWED_USER_IDS"
             printf 'HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS=30000\n'
+            printf 'HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES=26214400\n'
           } > "$ENV_PATH"
           rsync -az \
             -e "ssh -i ~/.ssh/home_gallery_ed25519 -o StrictHostKeyChecking=accept-new" \

@@ -44,6 +44,7 @@ declare module 'fastify' {
 
 const CORS_ALLOWED_HEADERS = ['authorization', 'content-type'];
 const CORS_METHODS = ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'];
+const PERMISSIONS_POLICY = 'camera=(), geolocation=(), microphone=()';
 
 /**
  * An empty allowlist keeps the API same-origin only, which is the safe default
@@ -97,6 +98,15 @@ export const createApp = async (
     app.decorate('mediaRepository', createMediaRepository(database));
     app.decorate('settingsRepository', createSettingsRepository(database));
     app.decorate('mediaStorage', storage);
+
+    app.addHook('onSend', async (_request, reply, payload) => {
+      reply
+        .header('x-content-type-options', 'nosniff')
+        .header('referrer-policy', 'no-referrer')
+        .header('x-frame-options', 'DENY')
+        .header('permissions-policy', PERMISSIONS_POLICY);
+      return payload;
+    });
 
     registerErrorHandling(app);
     registerAuthentication(app, config.apiToken);
