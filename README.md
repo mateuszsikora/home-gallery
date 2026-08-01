@@ -6,6 +6,8 @@ The project is under active development. The product requirements are in [docs/S
 
 The MVP HTTP routes and representative payloads are documented in [docs/API.md](docs/API.md).
 
+Production images, Docker Compose deployment, backup and restore, rollback, and the Tailscale/SSH delivery workflow are documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Local development
 
 The foundation requires Node.js 24 and the npm version bundled with it. From a clean checkout:
@@ -101,3 +103,12 @@ Each application will remain independently deployable and communicate through pu
 ## Deployment target
 
 The MVP will run on the same LAN server as Tappa (`192.168.21.250`) while remaining an independent stack. Home Gallery will use its own Compose project, configuration directory, secrets, ports, containers, network, and persistent data. The deployment plan deliberately follows Tappa's proven private-GHCR and Tailscale/SSH delivery workflow without coupling either application's runtime.
+
+From a configured production checkout, validate and start the isolated stack with:
+
+```bash
+docker compose --env-file .env config --quiet
+docker compose --env-file .env up -d --build --wait
+```
+
+The default LAN endpoints are gallery `:3010`, administration `:3011`, and API `:3012`. Use `npm run test:compose` to exercise image upload, restart persistence, coordinated backup, and restore in a disposable Compose project.

@@ -13,10 +13,12 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
+    "compose:config": "docker compose --env-file .env.example config --quiet",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
+    "test:compose": "bash scripts/compose-smoke.sh",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
