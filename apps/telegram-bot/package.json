@@ -10,6 +10,13 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -b tsconfig.json",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@home-gallery/api-client": "^0.0.0",
+    "@home-gallery/config": "^0.0.0",
+    "@home-gallery/shared-types": "^0.0.0",
+    "telegraf": "^4.16.3"
   }
 }
