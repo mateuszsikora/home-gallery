@@ -267,16 +267,16 @@ On every successful push to `main`, CI:
 
 Configure these repository or production-environment secrets:
 
-- `HOME_GALLERY_TS_OAUTH_CLIENT_ID`;
-- `HOME_GALLERY_TS_OAUTH_SECRET`;
-- `HOME_GALLERY_DEPLOY_HOST`;
-- `HOME_GALLERY_DEPLOY_USER`;
-- `HOME_GALLERY_DEPLOY_SSH_KEY`;
-- `HOME_GALLERY_ADMIN_TOKEN`;
-- `HOME_GALLERY_INGESTION_TOKEN`;
-- `HOME_GALLERY_TELEGRAM_BOT_TOKEN`.
+- `TS_OAUTH_CLIENT_ID`;
+- `TS_OAUTH_SECRET`;
+- `DEPLOY_HOST`;
+- `DEV_SSH_USER`;
+- `DEPLOY_SSH_KEY`;
+- `ADMIN_TOKEN`;
+- `INGESTION_TOKEN`;
+- `TELEGRAM_BOT_TOKEN`.
 
-Optional previous-token secrets `HOME_GALLERY_ADMIN_TOKEN_PREVIOUS` and `HOME_GALLERY_INGESTION_TOKEN_PREVIOUS` support the documented overlap window. Optional Actions variables configure ports, limits, proxy trust, administration uploads, and session lifetime/capacity using the matching `.env.example` names. The workflow writes `HOME_GALLERY_ADMIN_SESSION_SECURE=false` for the base profile, and the TLS Compose override forces it to `true` when TLS is enabled.
+Optional previous-token secrets `ADMIN_TOKEN_PREVIOUS` and `INGESTION_TOKEN_PREVIOUS` support the documented overlap window. Optional Actions variables configure ports, limits, proxy trust, administration uploads, and session lifetime/capacity using the matching `.env.example` names. The workflow writes `HOME_GALLERY_ADMIN_SESSION_SECURE=false` for the base profile, and the TLS Compose override forces it to `true` when TLS is enabled.
 
 To enable automated TLS deployment, set `HOME_GALLERY_TLS_ENABLED=true`, `HOME_GALLERY_HTTP_BIND_ADDRESS=127.0.0.1`, `HOME_GALLERY_TLS_GALLERY_HOST`, and `HOME_GALLERY_TLS_ADMIN_HOST` as Actions variables. Optional `HOME_GALLERY_TLS_HTTP_PORT` and `HOME_GALLERY_TLS_HTTPS_PORT` variables override ports 80 and 443. Use a dedicated Tailscale ACL grant for the CI tag and restrict the SSH key to the deployment host.
 
