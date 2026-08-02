@@ -16,11 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HomeGalleryApiError } from '@home-gallery/api-client';
 import type { GallerySettings, MediaRecord } from '@home-gallery/shared-types';
 
-import {
-  AdminApp,
-  SESSION_TOKEN_KEY,
-  type AdminClient,
-} from '../src/admin-app.js';
+import { AdminApp, type AdminClient } from '../src/admin-app.js';
 
 const ids = {
   first: '00000000-0000-4000-8000-000000000001',
@@ -59,7 +55,10 @@ const settings: GallerySettings = {
 
 interface ClientMocks {
   readonly client: AdminClient;
+  readonly createAdminSession: ReturnType<typeof vi.fn>;
+  readonly deleteAdminSession: ReturnType<typeof vi.fn>;
   readonly deleteMedia: ReturnType<typeof vi.fn>;
+  readonly getAdminSession: ReturnType<typeof vi.fn>;
   readonly getSettings: ReturnType<typeof vi.fn>;
   readonly listMedia: ReturnType<typeof vi.fn>;
   readonly updateMedia: ReturnType<typeof vi.fn>;
@@ -70,6 +69,14 @@ interface ClientMocks {
 const createClientMocks = (
   items: readonly MediaRecord[] = [firstMedia, secondMedia],
 ): ClientMocks => {
+  const unauthorized = new HomeGalleryApiError(401, 'No active session', {
+    error: { code: 'unauthorized', message: 'No active session' },
+  });
+  const createAdminSession = vi
+    .fn()
+    .mockResolvedValue({ expiresAt: '2026-08-02T12:00:00.000Z' });
+  const getAdminSession = vi.fn().mockRejectedValue(unauthorized);
+  const deleteAdminSession = vi.fn().mockResolvedValue(undefined);
   const listMedia = vi.fn().mockResolvedValue({ items, nextCursor: null });
   const getSettings = vi.fn().mockResolvedValue(settings);
   const uploadMedia = vi.fn().mockResolvedValue(firstMedia);
@@ -92,7 +99,10 @@ const createClientMocks = (
 
   return {
     client: {
+      createAdminSession,
+      deleteAdminSession,
       deleteMedia,
+      getAdminSession,
       getMediaContentUrl: (id) => `http://api.test/media/${id}`,
       getSettings,
       listMedia,
@@ -100,7 +110,10 @@ const createClientMocks = (
       updateSettings,
       uploadMedia,
     },
+    createAdminSession,
+    deleteAdminSession,
     deleteMedia,
+    getAdminSession,
     getSettings,
     listMedia,
     updateMedia,
@@ -114,12 +127,16 @@ const openStudio = async (client: AdminClient): Promise<void> => {
   const createClient = vi.fn().mockReturnValue(client);
   render(<AdminApp apiBaseUrl="http://api.test" createClient={createClient} />);
 
-  await user.type(screen.getByLabelText('Access token'), 'private-token');
+  await user.type(
+    await screen.findByLabelText('Access token'),
+    'private-token',
+  );
   await user.click(screen.getByRole('button', { name: 'Open studio' }));
   expect(
     await screen.findByRole('heading', { name: 'Photos on rotation' }),
   ).toBeVisible();
-  expect(createClient).toHaveBeenCalledWith('private-token');
+  expect(createClient).toHaveBeenCalledWith();
+  expect(client.createAdminSession).toHaveBeenCalledWith('private-token');
 };
 
 const mediaCard = (filename: string): HTMLElement => {
@@ -136,6 +153,7 @@ const mediaCard = (filename: string): HTMLElement => {
 afterEach(() => {
   cleanup();
   window.sessionStorage.clear();
+  window.localStorage.clear();
 });
 
 describe('AdminApp', () => {
@@ -145,7 +163,7 @@ describe('AdminApp', () => {
       error: { code: 'unauthorized', message: 'Invalid bearer token' },
     });
     const mocks = createClientMocks([]);
-    mocks.listMedia.mockRejectedValue(unauthorized);
+    mocks.createAdminSession.mockRejectedValue(unauthorized);
 
     render(
       <AdminApp
@@ -153,19 +171,25 @@ describe('AdminApp', () => {
         createClient={() => mocks.client}
       />,
     );
-    await user.type(screen.getByLabelText('Access token'), 'wrong-token');
+    await user.type(
+      await screen.findByLabelText('Access token'),
+      'wrong-token',
+    );
     await user.click(screen.getByRole('button', { name: 'Open studio' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('access token was rejected');
     expect(alert).toHaveFocus();
-    expect(window.sessionStorage.getItem(SESSION_TOKEN_KEY)).toBeNull();
+    expect(window.sessionStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(0);
     expect(window.location.href).not.toContain('wrong-token');
   });
 
-  it('restores a session credential and presents the empty library state', async () => {
+  it('restores an HttpOnly session and presents the empty library state', async () => {
     const mocks = createClientMocks([]);
-    window.sessionStorage.setItem(SESSION_TOKEN_KEY, 'session-token');
+    mocks.getAdminSession.mockResolvedValue({
+      expiresAt: '2026-08-02T12:00:00.000Z',
+    });
     const createClient = vi.fn().mockReturnValue(mocks.client);
 
     render(
@@ -177,8 +201,42 @@ describe('AdminApp', () => {
         name: 'The first frame is waiting.',
       }),
     ).toBeVisible();
-    expect(createClient).toHaveBeenCalledWith('session-token');
+    expect(createClient).toHaveBeenCalledWith();
+    expect(mocks.getAdminSession).toHaveBeenCalledOnce();
+    expect(mocks.createAdminSession).not.toHaveBeenCalled();
+    expect(window.sessionStorage.length).toBe(0);
     expect(screen.getByText('0 photos')).toBeVisible();
+  });
+
+  it('invalidates the server session before locking the studio', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([]);
+    await openStudio(mocks.client);
+
+    await user.click(screen.getByRole('button', { name: 'Lock studio' }));
+
+    expect(mocks.deleteAdminSession).toHaveBeenCalledOnce();
+    expect(await screen.findByLabelText('Access token')).toBeVisible();
+  });
+
+  it('returns to sign-in when a server session expires during an action', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([]);
+    await openStudio(mocks.client);
+    mocks.updateSettings.mockRejectedValueOnce(
+      new HomeGalleryApiError(401, 'Session expired', {
+        error: { code: 'unauthorized', message: 'Session expired' },
+      }),
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: 'Save playback settings' }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your session expired',
+    );
+    expect(screen.getByLabelText('Access token')).toBeVisible();
   });
 
   it('uploads a selected image through the shared client', async () => {

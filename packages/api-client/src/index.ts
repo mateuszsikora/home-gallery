@@ -1,5 +1,8 @@
 import {
+  ADMIN_SESSION_CSRF_HEADER,
+  ADMIN_SESSION_CSRF_VALUE,
   API_ROUTES,
+  adminSessionSchema,
   apiErrorBodySchema,
   gallerySettingsSchema,
   gallerySettingsUpdateInputSchema,
@@ -12,6 +15,7 @@ import {
   mediaUploadMetadataSchema,
   playlistResponseSchema,
   type ApiErrorBody,
+  type AdminSession,
   type GallerySettings,
   type GallerySettingsUpdateInput,
   type HealthResponse,
@@ -33,6 +37,7 @@ interface RuntimeSchema<Output> {
 export interface HomeGalleryClientOptions {
   baseUrl: string;
   token?: string;
+  useAdminSession?: boolean;
   fetch?: typeof globalThis.fetch;
 }
 
@@ -71,6 +76,9 @@ export class HomeGalleryResponseError extends Error {
 }
 
 export interface HomeGalleryClient {
+  createAdminSession(token: string): Promise<AdminSession>;
+  getAdminSession(): Promise<AdminSession>;
+  deleteAdminSession(): Promise<void>;
   getHealth(): Promise<HealthResponse>;
   uploadMedia(input: UploadMediaInput): Promise<MediaRecord>;
   listMedia(query?: MediaListQuery): Promise<MediaListResponse>;
@@ -131,6 +139,7 @@ export const createHomeGalleryClient = (
   const baseUrl = normalizeBaseUrl(options.baseUrl);
   const fetchImplementation = options.fetch ?? globalThis.fetch;
   const token = options.token?.trim();
+  const useAdminSession = options.useAdminSession ?? false;
 
   if (typeof fetchImplementation !== 'function') {
     throw new TypeError('A Fetch API implementation is required');
@@ -138,6 +147,19 @@ export const createHomeGalleryClient = (
 
   if (options.token !== undefined && !token) {
     throw new TypeError('Home Gallery bearer token must not be empty');
+  }
+
+  if (token !== undefined && useAdminSession) {
+    throw new TypeError(
+      'Choose either a bearer token or an administration session',
+    );
+  }
+
+  interface RequestAuthentication {
+    readonly authenticated?: boolean;
+    readonly bearerToken?: string;
+    readonly csrf?: boolean;
+    readonly session?: boolean;
   }
 
   const buildUrl = (
@@ -158,7 +180,7 @@ export const createHomeGalleryClient = (
   const request = async (
     path: string,
     init: RequestInit,
-    authenticated: boolean,
+    authentication: RequestAuthentication = {},
     query?: Readonly<Record<string, string | number | undefined>>,
   ): Promise<Response> => {
     const headers = new Headers(init.headers);
@@ -167,13 +189,31 @@ export const createHomeGalleryClient = (
       headers.set('accept', 'application/json');
     }
 
-    if (authenticated && token) {
-      headers.set('authorization', `Bearer ${token}`);
+    const requestToken =
+      authentication.bearerToken ??
+      (authentication.authenticated ? token : undefined);
+
+    if (requestToken !== undefined) {
+      headers.set('authorization', `Bearer ${requestToken}`);
+    }
+
+    const sessionRequest =
+      authentication.session === true ||
+      (authentication.authenticated === true && useAdminSession);
+
+    if (
+      sessionRequest &&
+      (authentication.csrf === true ||
+        !['GET', 'HEAD', 'OPTIONS'].includes(init.method ?? 'GET')) &&
+      requestToken === undefined
+    ) {
+      headers.set(ADMIN_SESSION_CSRF_HEADER, ADMIN_SESSION_CSRF_VALUE);
     }
 
     const response = await fetchImplementation(buildUrl(path, query), {
       ...init,
       headers,
+      ...(sessionRequest ? { credentials: 'include' } : {}),
     });
 
     if (!response.ok) {
@@ -194,10 +234,10 @@ export const createHomeGalleryClient = (
     path: string,
     schema: RuntimeSchema<Output>,
     init: RequestInit,
-    authenticated: boolean,
+    authentication: RequestAuthentication = {},
     query?: Readonly<Record<string, string | number | undefined>>,
   ): Promise<Output> => {
-    const response = await request(path, init, authenticated, query);
+    const response = await request(path, init, authentication, query);
     const text = await response.text();
 
     if (text.length === 0) {
@@ -232,13 +272,38 @@ export const createHomeGalleryClient = (
   });
 
   return {
-    getHealth: () =>
+    createAdminSession: (bootstrapToken) => {
+      const trimmedToken = bootstrapToken.trim();
+
+      if (trimmedToken.length === 0) {
+        throw new TypeError('Administration bearer token must not be empty');
+      }
+
+      return requestJson(
+        API_ROUTES.adminSession,
+        adminSessionSchema,
+        jsonInit('POST'),
+        { bearerToken: trimmedToken, session: true },
+      );
+    },
+
+    getAdminSession: () =>
       requestJson(
-        API_ROUTES.health,
-        healthResponseSchema,
+        API_ROUTES.adminSession,
+        adminSessionSchema,
         jsonInit('GET'),
-        false,
+        { session: true },
       ),
+
+    deleteAdminSession: async () => {
+      await request(API_ROUTES.adminSession, jsonInit('DELETE'), {
+        csrf: true,
+        session: true,
+      });
+    },
+
+    getHealth: () =>
+      requestJson(API_ROUTES.health, healthResponseSchema, jsonInit('GET'), {}),
 
     uploadMedia: (input) => {
       const { file, ...metadataInput } = input;
@@ -260,7 +325,7 @@ export const createHomeGalleryClient = (
         API_ROUTES.media,
         mediaRecordSchema,
         { method: 'POST', body: formData },
-        true,
+        { authenticated: true },
       );
     },
 
@@ -270,7 +335,7 @@ export const createHomeGalleryClient = (
         API_ROUTES.media,
         mediaListResponseSchema,
         jsonInit('GET'),
-        true,
+        { authenticated: true },
         parsed,
       );
     },
@@ -281,7 +346,7 @@ export const createHomeGalleryClient = (
         API_ROUTES.mediaById(parsedId),
         mediaRecordSchema,
         jsonInit('GET'),
-        true,
+        { authenticated: true },
       );
     },
 
@@ -292,13 +357,15 @@ export const createHomeGalleryClient = (
         API_ROUTES.mediaById(parsedId),
         mediaRecordSchema,
         jsonInit('PATCH', parsedInput),
-        true,
+        { authenticated: true },
       );
     },
 
     deleteMedia: async (id) => {
       const parsedId = mediaIdSchema.parse(id);
-      await request(API_ROUTES.mediaById(parsedId), jsonInit('DELETE'), true);
+      await request(API_ROUTES.mediaById(parsedId), jsonInit('DELETE'), {
+        authenticated: true,
+      });
     },
 
     getPlaylist: () =>
@@ -306,7 +373,7 @@ export const createHomeGalleryClient = (
         API_ROUTES.playlist,
         playlistResponseSchema,
         jsonInit('GET'),
-        false,
+        {},
       ),
 
     getMediaContent: async (id) => {
@@ -314,7 +381,7 @@ export const createHomeGalleryClient = (
       const response = await request(
         API_ROUTES.mediaContentById(parsedId),
         { method: 'GET', headers: { accept: 'image/webp' } },
-        false,
+        {},
       );
       return response.blob();
     },
@@ -325,12 +392,9 @@ export const createHomeGalleryClient = (
     },
 
     getSettings: () =>
-      requestJson(
-        API_ROUTES.settings,
-        gallerySettingsSchema,
-        jsonInit('GET'),
-        true,
-      ),
+      requestJson(API_ROUTES.settings, gallerySettingsSchema, jsonInit('GET'), {
+        authenticated: true,
+      }),
 
     updateSettings: (input) => {
       const parsedInput = gallerySettingsUpdateInputSchema.parse(input);
@@ -338,7 +402,7 @@ export const createHomeGalleryClient = (
         API_ROUTES.settings,
         gallerySettingsSchema,
         jsonInit('PATCH', parsedInput),
-        true,
+        { authenticated: true },
       );
     },
   };

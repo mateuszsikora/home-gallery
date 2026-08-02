@@ -72,6 +72,61 @@ curl --fail --silent --show-error --head \
 curl --fail --silent --show-error "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/" |
   grep -q '<title>Home Gallery Admin</title>'
 
+SESSION_COOKIE_JAR=$TEMP_DIR/admin-session.cookies
+SESSION_RESPONSE=$(curl --fail --silent --show-error \
+  --cookie-jar "$SESSION_COOKIE_JAR" \
+  --request POST \
+  --header "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/admin/session")
+if ! grep -q '"expiresAt"' <<<"$SESSION_RESPONSE"; then
+  echo "ERROR: Administration session response has no expiry: $SESSION_RESPONSE" >&2
+  exit 1
+fi
+if ! grep -q 'home_gallery_admin_session' "$SESSION_COOKIE_JAR"; then
+  echo "ERROR: Administration session cookie was not stored." >&2
+  exit 1
+fi
+if grep -q "$ADMIN_TOKEN" "$SESSION_COOKIE_JAR"; then
+  echo "ERROR: Administration bearer leaked into the cookie jar." >&2
+  exit 1
+fi
+
+curl --fail --silent --show-error \
+  --cookie "$SESSION_COOKIE_JAR" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media" |
+  grep -q '"items"'
+MISSING_CSRF_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$SESSION_COOKIE_JAR" \
+  --request PATCH \
+  --header 'Content-Type: application/json' \
+  --data '{"slideDurationMs":3000}' \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/settings")
+if [[ "$MISSING_CSRF_STATUS" != "403" ]]; then
+  echo "ERROR: Cookie mutation without CSRF header received $MISSING_CSRF_STATUS." >&2
+  exit 1
+fi
+curl --fail --silent --show-error \
+  --cookie "$SESSION_COOKIE_JAR" \
+  --request PATCH \
+  --header 'X-Home-Gallery-CSRF: 1' \
+  --header 'Content-Type: application/json' \
+  --data '{"slideDurationMs":3000}' \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/settings" |
+  grep -q '"slideDurationMs":3000'
+curl --fail --silent --show-error \
+  --cookie "$SESSION_COOKIE_JAR" \
+  --cookie-jar "$SESSION_COOKIE_JAR" \
+  --request DELETE \
+  --header 'X-Home-Gallery-CSRF: 1' \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/admin/session"
+LOGGED_OUT_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$SESSION_COOKIE_JAR" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media")
+if [[ "$LOGGED_OUT_STATUS" != "401" ]]; then
+  echo "ERROR: Logged-out administration session received $LOGGED_OUT_STATUS." >&2
+  exit 1
+fi
+
 printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' |
   openssl base64 -d -A >"$TEMP_DIR/smoke.png"
 
@@ -144,6 +199,12 @@ if [[ "${HOME_GALLERY_SMOKE_REPORT_RESOURCES:-0}" == "1" ]]; then
     "${RESOURCE_CONTAINERS[@]}"
 fi
 
+curl --fail --silent --show-error \
+  --cookie-jar "$SESSION_COOKIE_JAR" \
+  --request POST \
+  --header "Authorization: Bearer $ADMIN_TOKEN" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/admin/session" >/dev/null
+
 dc stop --timeout 15 server
 SERVER_CONTAINER_ID=$(dc ps --all --quiet server)
 SERVER_EXIT_CODE=$(docker inspect --format '{{.State.ExitCode}}' "$SERVER_CONTAINER_ID")
@@ -155,6 +216,13 @@ dc up -d --wait --wait-timeout 120 server
 curl --fail --silent --show-error \
   "http://127.0.0.1:$HOME_GALLERY_API_PORT/api/playlist" |
   grep -q "$MEDIA_ID"
+RESTARTED_SESSION_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$SESSION_COOKIE_JAR" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media")
+if [[ "$RESTARTED_SESSION_STATUS" != "401" ]]; then
+  echo "ERROR: Administration session survived a server restart." >&2
+  exit 1
+fi
 
 "$REPOSITORY_ROOT/infra/backup.sh"
 BACKUP_PATH=$(find "$HOME_GALLERY_BACKUP_DIR" -maxdepth 1 \

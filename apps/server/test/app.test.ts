@@ -169,6 +169,7 @@ describe('server application', () => {
       expect(response.headers['access-control-allow-origin']).toBe(
         'http://gallery.local:3010',
       );
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
     });
 
     it('does not allow an origin that is not configured', async () => {
@@ -184,6 +185,39 @@ describe('server application', () => {
       const response = await requestWithOrigin(['*'], 'http://anywhere.local');
 
       expect(response.headers['access-control-allow-origin']).toBe('*');
+      expect(
+        response.headers['access-control-allow-credentials'],
+      ).toBeUndefined();
+    });
+
+    it('allows the administration CSRF header in an explicit-origin preflight', async () => {
+      const app = await createApp(
+        createTestConfig(dataDirectory, {
+          allowedOrigins: ['http://admin.local:3011'],
+        }),
+      );
+
+      try {
+        const response = await app.inject({
+          method: 'OPTIONS',
+          url: API_ROUTES.adminSession,
+          headers: {
+            origin: 'http://admin.local:3011',
+            'access-control-request-method': 'DELETE',
+            'access-control-request-headers': 'x-home-gallery-csrf',
+          },
+        });
+
+        expect(response.statusCode).toBe(204);
+        expect(response.headers['access-control-allow-headers']).toContain(
+          'x-home-gallery-csrf',
+        );
+        expect(response.headers['access-control-allow-credentials']).toBe(
+          'true',
+        );
+      } finally {
+        await app.close();
+      }
     });
   });
 });

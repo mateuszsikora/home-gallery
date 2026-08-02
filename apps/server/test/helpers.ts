@@ -38,6 +38,7 @@ export const createTestConfig = (
   administrationTokens: [TEST_API_TOKEN],
   ingestionTokens: [TEST_INGESTION_TOKEN],
   allowAdministrationUploads: false,
+  adminSession: { max: 64, secure: false, ttlMs: 8 * 60 * 60 * 1_000 },
   authenticationRateLimit: { max: 10, windowMs: 60_000 },
   uploadRateLimit: { max: 30, windowMs: 60_000 },
   trustedProxies: [],

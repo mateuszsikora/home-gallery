@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { ConfigurationError } from '../src/errors.js';
 import {
+  DEFAULT_ADMIN_SESSION_MAX,
+  DEFAULT_ADMIN_SESSION_TTL_MS,
   DEFAULT_AUTH_RATE_LIMIT_MAX,
   DEFAULT_AUTH_RATE_LIMIT_WINDOW_MS,
   DEFAULT_MAX_STORED_FILES,
@@ -49,6 +51,11 @@ describe('loadServerConfig', () => {
       administrationTokens: [VALID_TOKEN],
       ingestionTokens: [INGESTION_TOKEN],
       allowAdministrationUploads: false,
+      adminSession: {
+        max: DEFAULT_ADMIN_SESSION_MAX,
+        secure: false,
+        ttlMs: DEFAULT_ADMIN_SESSION_TTL_MS,
+      },
       authenticationRateLimit: {
         max: DEFAULT_AUTH_RATE_LIMIT_MAX,
         windowMs: DEFAULT_AUTH_RATE_LIMIT_WINDOW_MS,
@@ -76,6 +83,9 @@ describe('loadServerConfig', () => {
           HOME_GALLERY_ADMIN_TOKEN_PREVIOUS: 'c'.repeat(32),
           HOME_GALLERY_INGESTION_TOKEN_PREVIOUS: 'd'.repeat(32),
           HOME_GALLERY_ALLOW_ADMIN_UPLOADS: 'true',
+          HOME_GALLERY_ADMIN_SESSION_TTL_MS: '3600000',
+          HOME_GALLERY_ADMIN_SESSION_MAX: '12',
+          HOME_GALLERY_ADMIN_SESSION_SECURE: 'true',
           HOME_GALLERY_AUTH_RATE_LIMIT_MAX: '5',
           HOME_GALLERY_AUTH_RATE_LIMIT_WINDOW_MS: '120000',
           HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX: '8',
@@ -95,6 +105,7 @@ describe('loadServerConfig', () => {
       administrationTokens: [VALID_TOKEN, 'c'.repeat(32)],
       ingestionTokens: [INGESTION_TOKEN, 'd'.repeat(32)],
       allowAdministrationUploads: true,
+      adminSession: { max: 12, secure: true, ttlMs: 3_600_000 },
       authenticationRateLimit: { max: 5, windowMs: 120_000 },
       uploadRateLimit: { max: 8, windowMs: 30_000 },
       trustedProxies: ['127.0.0.1', '10.10.0.0/16'],
@@ -176,6 +187,9 @@ describe('loadServerConfig', () => {
     ['HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX', '100001'],
     ['HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS', '86400001'],
     ['HOME_GALLERY_ALLOW_ADMIN_UPLOADS', 'yes'],
+    ['HOME_GALLERY_ADMIN_SESSION_TTL_MS', '59999'],
+    ['HOME_GALLERY_ADMIN_SESSION_MAX', '0'],
+    ['HOME_GALLERY_ADMIN_SESSION_SECURE', 'yes'],
   ] as const)(
     'rejects invalid defense-in-depth variable %s',
     (variable, value) => {

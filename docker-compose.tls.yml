@@ -3,6 +3,7 @@ services:
     environment:
       # The only HTTP proxies in this dedicated network are project services.
       HOME_GALLERY_TRUSTED_PROXIES: uniquelocal
+      HOME_GALLERY_ADMIN_SESSION_SECURE: 'true'
   caddy:
     image: caddy:2.11.4-alpine
     platform: linux/amd64

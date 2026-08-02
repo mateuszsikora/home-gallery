@@ -53,6 +53,13 @@ if (
   throw new Error('TLS profile did not configure its private proxy trust');
 }
 
+if (
+  config.services.server.environment.HOME_GALLERY_ADMIN_SESSION_SECURE !==
+  'true'
+) {
+  throw new Error('TLS profile did not enable Secure administration cookies');
+}
+
 const caddyPorts = config.services.caddy.ports ?? [];
 if (!caddyPorts.some((port) => String(port.published) === '443')) {
   throw new Error('TLS profile does not publish the HTTPS port');

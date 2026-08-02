@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { ALLOW_ALL_ORIGINS, type ServerConfig } from '@home-gallery/config';
@@ -19,6 +20,8 @@ import {
   createSettingsRepository,
   type SettingsRepository,
 } from './database/settings-repository.js';
+import { AdminSessionStore } from './http/admin-session-store.js';
+import { registerAdminSessionRoutes } from './http/admin-session-routes.js';
 import { registerAuthentication } from './http/authentication.js';
 import { registerErrorHandling } from './http/errors.js';
 import { registerHealthRoute } from './http/health-route.js';
@@ -43,7 +46,11 @@ declare module 'fastify' {
   }
 }
 
-const CORS_ALLOWED_HEADERS = ['authorization', 'content-type'];
+const CORS_ALLOWED_HEADERS = [
+  'authorization',
+  'content-type',
+  'x-home-gallery-csrf',
+];
 const CORS_METHODS = ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'];
 const PERMISSIONS_POLICY = 'camera=(), geolocation=(), microphone=()';
 
@@ -112,6 +119,9 @@ export const createApp = async (
     });
 
     registerErrorHandling(app);
+    await app.register(cookie);
+
+    const adminSessionStore = new AdminSessionStore(config.adminSession);
     registerAuthentication(app, {
       administrationTokens: config.administrationTokens,
       ingestionTokens: config.ingestionTokens,
@@ -119,6 +129,7 @@ export const createApp = async (
       failureLimiter: new FixedWindowRateLimiter(
         config.authenticationRateLimit,
       ),
+      sessionStore: adminSessionStore,
     });
 
     await app.register(multipart, {
@@ -137,7 +148,9 @@ export const createApp = async (
       origin: toCorsOrigin(config.allowedOrigins),
       methods: CORS_METHODS,
       allowedHeaders: CORS_ALLOWED_HEADERS,
-      credentials: false,
+      credentials:
+        config.allowedOrigins.length > 0 &&
+        !config.allowedOrigins.includes(ALLOW_ALL_ORIGINS),
       maxAge: 600,
     });
 
@@ -145,6 +158,10 @@ export const createApp = async (
       database,
       version: config.version,
       startedAt,
+    });
+    registerAdminSessionRoutes(app, {
+      secureCookie: config.adminSession.secure,
+      sessionStore: adminSessionStore,
     });
     registerMediaUploadRoute(app);
     registerMediaRoutes(app);
@@ -164,6 +181,11 @@ export const createApp = async (
         authenticationRateLimit: config.authenticationRateLimit,
         uploadRateLimit: config.uploadRateLimit,
         allowAdministrationUploads: config.allowAdministrationUploads,
+        adminSession: {
+          max: config.adminSession.max,
+          secure: config.adminSession.secure,
+          ttlMs: config.adminSession.ttlMs,
+        },
       },
       'Home Gallery server initialized',
     );
