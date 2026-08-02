@@ -14,7 +14,11 @@ import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HomeGalleryApiError } from '@home-gallery/api-client';
-import type { GallerySettings, MediaRecord } from '@home-gallery/shared-types';
+import type {
+  GallerySettings,
+  MediaRecord,
+  TelegramContributor,
+} from '@home-gallery/shared-types';
 
 import { AdminApp, type AdminClient } from '../src/admin-app.js';
 
@@ -47,6 +51,22 @@ const mediaRecord = (
 
 const firstMedia = mediaRecord(ids.first, 'summer.jpg', 0);
 const secondMedia = mediaRecord(ids.second, 'forest.png', 1, false);
+const pendingContributor: TelegramContributor = {
+  telegramUserId: '123456',
+  status: 'pending',
+  firstName: 'Ada',
+  lastName: 'Lovelace',
+  username: 'ada',
+  requestedAt: '2026-08-01T10:00:00.000Z',
+  updatedAt: '2026-08-01T10:00:00.000Z',
+};
+const rejectedContributor: TelegramContributor = {
+  telegramUserId: '654321',
+  status: 'rejected',
+  firstName: 'Mallory',
+  requestedAt: '2026-07-30T10:00:00.000Z',
+  updatedAt: '2026-07-31T10:00:00.000Z',
+};
 const settings: GallerySettings = {
   slideDurationMs: 8_000,
   fadeDurationMs: 1_000,
@@ -61,13 +81,16 @@ interface ClientMocks {
   readonly getAdminSession: ReturnType<typeof vi.fn>;
   readonly getSettings: ReturnType<typeof vi.fn>;
   readonly listMedia: ReturnType<typeof vi.fn>;
+  readonly listTelegramContributors: ReturnType<typeof vi.fn>;
   readonly updateMedia: ReturnType<typeof vi.fn>;
   readonly updateSettings: ReturnType<typeof vi.fn>;
+  readonly updateTelegramContributor: ReturnType<typeof vi.fn>;
   readonly uploadMedia: ReturnType<typeof vi.fn>;
 }
 
 const createClientMocks = (
   items: readonly MediaRecord[] = [firstMedia, secondMedia],
+  contributors: readonly TelegramContributor[] = [],
 ): ClientMocks => {
   const unauthorized = new HomeGalleryApiError(401, 'No active session', {
     error: { code: 'unauthorized', message: 'No active session' },
@@ -90,6 +113,17 @@ const createClientMocks = (
       },
     );
   const deleteMedia = vi.fn().mockResolvedValue(undefined);
+  const listTelegramContributors = vi
+    .fn()
+    .mockResolvedValue({ items: [...contributors] });
+  const updateTelegramContributor = vi
+    .fn()
+    .mockImplementation(async (telegramUserId: string, update: unknown) => ({
+      ...(contributors.find(
+        (candidate) => candidate.telegramUserId === telegramUserId,
+      ) ?? pendingContributor),
+      ...(update as Record<string, unknown>),
+    }));
   const updateSettings = vi
     .fn()
     .mockImplementation(async (update: Partial<GallerySettings>) => ({
@@ -106,8 +140,10 @@ const createClientMocks = (
       getMediaContentUrl: (id) => `http://api.test/media/${id}`,
       getSettings,
       listMedia,
+      listTelegramContributors,
       updateMedia,
       updateSettings,
+      updateTelegramContributor,
       uploadMedia,
     },
     createAdminSession,
@@ -116,8 +152,10 @@ const createClientMocks = (
     getAdminSession,
     getSettings,
     listMedia,
+    listTelegramContributors,
     updateMedia,
     updateSettings,
+    updateTelegramContributor,
     uploadMedia,
   };
 };
@@ -350,6 +388,85 @@ describe('AdminApp', () => {
       await screen.findByText('summer.jpg was permanently deleted.'),
     ).toBeVisible();
     expect(screen.getByText('0 photos')).toBeVisible();
+  });
+
+  it('shows an empty contributor queue before anyone writes to the bot', async () => {
+    const mocks = createClientMocks([]);
+    await openStudio(mocks.client);
+
+    expect(mocks.listTelegramContributors).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole('heading', { name: 'Nobody has asked yet.' }),
+    ).toBeVisible();
+    expect(screen.getByText('0 waiting')).toBeVisible();
+  });
+
+  it('approves a pending contributor and keeps the decision visible', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([], [pendingContributor]);
+    await openStudio(mocks.client);
+
+    expect(screen.getByText('1 waiting')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Ada Lovelace' })).toBeVisible();
+    expect(screen.getByText('@ada · Telegram ID 123456')).toBeVisible();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Approve Ada Lovelace' }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.updateTelegramContributor).toHaveBeenCalledWith('123456', {
+        status: 'approved',
+      });
+    });
+    expect(
+      await screen.findByText(
+        'Ada Lovelace can now send photos to the gallery.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByText('Approved')).toBeVisible();
+    expect(screen.getByText('0 waiting')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Approve Ada Lovelace' }),
+    ).toBeNull();
+  });
+
+  it('lets an administrator reverse an earlier rejection', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([], [rejectedContributor]);
+    await openStudio(mocks.client);
+
+    expect(screen.getByText('Rejected')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Reject Mallory' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Approve Mallory' }));
+
+    await waitFor(() => {
+      expect(mocks.updateTelegramContributor).toHaveBeenCalledWith('654321', {
+        status: 'approved',
+      });
+    });
+    expect(await screen.findByText('Approved')).toBeVisible();
+  });
+
+  it('reports a failed contributor decision without changing the shown status', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([], [pendingContributor]);
+    mocks.updateTelegramContributor.mockRejectedValueOnce(
+      new HomeGalleryApiError(404, 'Contributor is gone', {
+        error: { code: 'not_found', message: 'Contributor is gone' },
+      }),
+    );
+    await openStudio(mocks.client);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Reject Ada Lovelace' }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Contributor is gone',
+    );
+    expect(screen.getByText('Waiting for review')).toBeVisible();
   });
 
   it('saves all playback settings and surfaces field validation errors', async () => {

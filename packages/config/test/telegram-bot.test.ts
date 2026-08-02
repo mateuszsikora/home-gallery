@@ -17,7 +17,6 @@ const environment = (
   HOME_GALLERY_TELEGRAM_BOT_TOKEN: BOT_TOKEN,
   HOME_GALLERY_API_URL: 'http://home-gallery-server:3012',
   HOME_GALLERY_INGESTION_TOKEN: API_TOKEN,
-  HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS: '123,456',
   ...overrides,
 });
 
@@ -46,21 +45,18 @@ describe('loadTelegramBotConfig', () => {
       requestTimeoutMs: DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS,
       maxDownloadBytes: DEFAULT_TELEGRAM_MAX_DOWNLOAD_BYTES,
     });
-    expect([...config.allowedUserIds]).toEqual([123, 456]);
   });
 
-  it('normalizes values and removes duplicate user IDs', () => {
+  it('normalizes optional values', () => {
     const config = loadTelegramBotConfig(
       environment({
         HOME_GALLERY_API_URL: 'https://gallery.example.test/',
-        HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS: ' 123, 456,123 ',
         HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS: '15000',
         HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES: '1048576',
       }),
     );
 
     expect(config.apiUrl).toBe('https://gallery.example.test');
-    expect([...config.allowedUserIds]).toEqual([123, 456]);
     expect(config.requestTimeoutMs).toBe(15_000);
     expect(config.maxDownloadBytes).toBe(1_048_576);
   });
@@ -70,7 +66,6 @@ describe('loadTelegramBotConfig', () => {
       'HOME_GALLERY_TELEGRAM_BOT_TOKEN',
       'HOME_GALLERY_API_URL',
       'HOME_GALLERY_INGESTION_TOKEN',
-      'HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS',
     ]);
   });
 
@@ -80,8 +75,6 @@ describe('loadTelegramBotConfig', () => {
     ['HOME_GALLERY_API_URL', 'ftp://gallery.example.test'],
     ['HOME_GALLERY_API_URL', 'https://user:secret@gallery.example.test'],
     ['HOME_GALLERY_INGESTION_TOKEN', 'too-short'],
-    ['HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS', '123,nope'],
-    ['HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS', '0'],
     ['HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS', '999'],
     ['HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS', '120001'],
     ['HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES', '1023'],

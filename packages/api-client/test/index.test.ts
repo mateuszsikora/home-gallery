@@ -294,6 +294,84 @@ describe('createHomeGalleryClient', () => {
     );
   });
 
+  it('registers, lists, and decides Telegram contributors', async () => {
+    const contributor = {
+      telegramUserId: '123456',
+      status: 'pending',
+      firstName: 'Ada',
+      requestedAt: '2026-08-01T10:00:00.000Z',
+      updatedAt: '2026-08-01T10:00:00.000Z',
+    };
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: init?.method ?? 'GET',
+        body:
+          init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+      });
+
+      return jsonResponse(
+        init?.method === 'GET'
+          ? { items: [contributor] }
+          : { ...contributor, status: 'approved' },
+      );
+    };
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test',
+      token: 'secret-token',
+      fetch: fetchImplementation,
+    });
+
+    await expect(
+      client.registerTelegramContributor({
+        telegramUserId: '123456',
+        firstName: 'Ada',
+      }),
+    ).resolves.toMatchObject({ status: 'approved' });
+    await expect(client.listTelegramContributors()).resolves.toEqual({
+      items: [contributor],
+    });
+    await expect(
+      client.updateTelegramContributor('123456', { status: 'approved' }),
+    ).resolves.toMatchObject({ status: 'approved' });
+
+    expect(requests).toEqual([
+      {
+        url: 'https://gallery.example.test/api/telegram/contributors',
+        method: 'POST',
+        body: { telegramUserId: '123456', firstName: 'Ada' },
+      },
+      {
+        url: 'https://gallery.example.test/api/telegram/contributors',
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: 'https://gallery.example.test/api/telegram/contributors/123456',
+        method: 'PATCH',
+        body: { status: 'approved' },
+      },
+    ]);
+  });
+
+  it('rejects a contributor decision the API would not accept', async () => {
+    let requestCount = 0;
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test',
+      token: 'secret-token',
+      fetch: async () => {
+        requestCount += 1;
+        return jsonResponse({});
+      },
+    });
+
+    expect(() =>
+      client.updateTelegramContributor('not-an-id', { status: 'approved' }),
+    ).toThrow();
+    expect(requestCount).toBe(0);
+  });
+
   it('rejects unsafe base URLs and empty tokens', () => {
     expect(() =>
       createHomeGalleryClient({

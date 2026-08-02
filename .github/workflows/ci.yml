@@ -208,7 +208,6 @@ jobs:
           INGESTION_TOKEN: ${{ secrets.HOME_GALLERY_INGESTION_TOKEN }}
           INGESTION_TOKEN_PREVIOUS: ${{ secrets.HOME_GALLERY_INGESTION_TOKEN_PREVIOUS }}
           BOT_TOKEN: ${{ secrets.HOME_GALLERY_TELEGRAM_BOT_TOKEN }}
-          ALLOWED_USER_IDS: ${{ secrets.HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS }}
           GALLERY_PORT: ${{ vars.HOME_GALLERY_GALLERY_PORT || '3010' }}
           ADMIN_PORT: ${{ vars.HOME_GALLERY_ADMIN_PORT || '3011' }}
           API_PORT: ${{ vars.HOME_GALLERY_API_PORT || '3012' }}
@@ -234,7 +233,6 @@ jobs:
           test -n "$ADMIN_TOKEN"
           test -n "$INGESTION_TOKEN"
           test -n "$BOT_TOKEN"
-          test -n "$ALLOWED_USER_IDS"
           ENV_PATH=$(mktemp)
           chmod 600 "$ENV_PATH"
           {
@@ -267,7 +265,6 @@ jobs:
             printf 'HOME_GALLERY_ALLOWED_ORIGINS=\n'
             printf 'HOME_GALLERY_LOG_LEVEL=info\n'
             printf 'HOME_GALLERY_TELEGRAM_BOT_TOKEN=%s\n' "$BOT_TOKEN"
-            printf 'HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS=%s\n' "$ALLOWED_USER_IDS"
             printf 'HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS=30000\n'
             printf 'HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES=26214400\n'
           } > "$ENV_PATH"

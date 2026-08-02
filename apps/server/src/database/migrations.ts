@@ -3,6 +3,7 @@ import {
   MEDIA_TYPES,
   NORMALIZED_MEDIA_MIME_TYPES,
   PLAYBACK_MODES,
+  TELEGRAM_CONTRIBUTOR_STATUSES,
   UPLOAD_SOURCES,
 } from '@home-gallery/shared-types';
 
@@ -72,6 +73,26 @@ const MIGRATIONS: readonly Migration[] = [
           DEFAULT_GALLERY_SETTINGS.fadeDurationMs,
           DEFAULT_GALLERY_SETTINGS.playbackMode,
         );
+    },
+  },
+  {
+    version: 3,
+    name: 'create_telegram_contributors',
+    apply: (database) => {
+      database.exec(`
+        CREATE TABLE telegram_contributors (
+          telegram_user_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL CHECK (status IN (${quotedList(TELEGRAM_CONTRIBUTOR_STATUSES)})),
+          first_name TEXT,
+          last_name TEXT,
+          username TEXT,
+          requested_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE INDEX telegram_contributors_status_idx
+          ON telegram_contributors (status, requested_at);
+      `);
     },
   },
 ];

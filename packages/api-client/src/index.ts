@@ -14,6 +14,11 @@ import {
   mediaUpdateInputSchema,
   mediaUploadMetadataSchema,
   playlistResponseSchema,
+  telegramContributorListResponseSchema,
+  telegramContributorRegistrationSchema,
+  telegramContributorSchema,
+  telegramContributorUpdateInputSchema,
+  telegramUserIdSchema,
   type ApiErrorBody,
   type AdminSession,
   type GallerySettings,
@@ -26,6 +31,11 @@ import {
   type MediaUpdateInput,
   type MediaUploadMetadata,
   type PlaylistResponse,
+  type TelegramContributor,
+  type TelegramContributorListResponse,
+  type TelegramContributorRegistration,
+  type TelegramContributorUpdateInput,
+  type TelegramUserId,
 } from '@home-gallery/shared-types';
 
 interface RuntimeSchema<Output> {
@@ -90,6 +100,14 @@ export interface HomeGalleryClient {
   getMediaContentUrl(id: MediaId): string;
   getSettings(): Promise<GallerySettings>;
   updateSettings(input: GallerySettingsUpdateInput): Promise<GallerySettings>;
+  registerTelegramContributor(
+    input: TelegramContributorRegistration,
+  ): Promise<TelegramContributor>;
+  listTelegramContributors(): Promise<TelegramContributorListResponse>;
+  updateTelegramContributor(
+    telegramUserId: TelegramUserId,
+    input: TelegramContributorUpdateInput,
+  ): Promise<TelegramContributor>;
 }
 
 const normalizeBaseUrl = (baseUrl: string): string => {
@@ -401,6 +419,35 @@ export const createHomeGalleryClient = (
       return requestJson(
         API_ROUTES.settings,
         gallerySettingsSchema,
+        jsonInit('PATCH', parsedInput),
+        { authenticated: true },
+      );
+    },
+
+    registerTelegramContributor: (input) => {
+      const parsedInput = telegramContributorRegistrationSchema.parse(input);
+      return requestJson(
+        API_ROUTES.telegramContributors,
+        telegramContributorSchema,
+        jsonInit('POST', parsedInput),
+        { authenticated: true },
+      );
+    },
+
+    listTelegramContributors: () =>
+      requestJson(
+        API_ROUTES.telegramContributors,
+        telegramContributorListResponseSchema,
+        jsonInit('GET'),
+        { authenticated: true },
+      ),
+
+    updateTelegramContributor: (telegramUserId, input) => {
+      const parsedId = telegramUserIdSchema.parse(telegramUserId);
+      const parsedInput = telegramContributorUpdateInputSchema.parse(input);
+      return requestJson(
+        API_ROUTES.telegramContributorById(parsedId),
+        telegramContributorSchema,
         jsonInit('PATCH', parsedInput),
         { authenticated: true },
       );

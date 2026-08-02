@@ -6,6 +6,7 @@ import type { MultipartFile } from '@fastify/multipart';
 import {
   API_ROUTES,
   mediaUploadMetadataSchema,
+  telegramUserIdSchema,
   toApiErrorIssues,
   type MediaRecord,
   type MediaUploadMetadata,
@@ -131,6 +132,34 @@ const parseUpload = async (
   }
 };
 
+/**
+ * Telegram media is accepted only for a contributor an administrator approved.
+ * The bot already refuses to download for anybody else, but the ingestion
+ * credential is shared with the bot, so the server must make the authorization
+ * decision itself. An unknown, unidentified, pending, and rejected contributor
+ * are answered identically so the caller learns nothing about the review queue.
+ */
+const requireApprovedContributor = (
+  app: FastifyInstance,
+  metadata: MediaUploadMetadata,
+): void => {
+  if (metadata.source !== 'telegram') {
+    return;
+  }
+
+  const parsedId = telegramUserIdSchema.safeParse(metadata.sourceId);
+  const contributor = parsedId.success
+    ? app.telegramContributorRepository.findByTelegramUserId(parsedId.data)
+    : undefined;
+
+  if (contributor?.status !== 'approved') {
+    throw new ApiError(
+      'forbidden',
+      'This Telegram contributor is not approved to submit media',
+    );
+  }
+};
+
 const toImageApiError = (error: unknown): ApiError => {
   if (error instanceof UnsupportedImageFormatError) {
     return new ApiError('unsupported_media_type', error.message);
@@ -175,6 +204,7 @@ export const registerMediaUploadRoute = (app: FastifyInstance): void => {
       try {
         const parsed = await parseUpload(app, request);
         uploadedFile = parsed.uploadedFile;
+        requireApprovedContributor(app, parsed.metadata);
         normalizedFile = await app.mediaStorage.createTemporaryFile();
 
         let dimensions;

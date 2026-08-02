@@ -2,6 +2,8 @@ import type { HomeGalleryClient } from '@home-gallery/api-client';
 import {
   SUPPORTED_UPLOAD_MIME_TYPES,
   type SupportedUploadMimeType,
+  type TelegramContributorRegistration,
+  type TelegramContributorStatus,
 } from '@home-gallery/shared-types';
 
 import { safeErrorFields, type BotLogger } from './logger.js';
@@ -41,8 +43,10 @@ export interface TelegramGateway {
 }
 
 export interface TelegramIngestionOptions {
-  allowedUserIds: ReadonlySet<number>;
-  homeGalleryClient: Pick<HomeGalleryClient, 'uploadMedia'>;
+  homeGalleryClient: Pick<
+    HomeGalleryClient,
+    'registerTelegramContributor' | 'uploadMedia'
+  >;
   telegram: TelegramGateway;
   fetch?: typeof globalThis.fetch;
   logger: BotLogger;
@@ -52,7 +56,7 @@ export interface TelegramIngestionOptions {
 }
 
 export type TelegramIngestionResult =
-  'rejected' | 'unsupported' | 'uploaded' | 'failed';
+  'pending' | 'rejected' | 'unsupported' | 'uploaded' | 'failed';
 
 export class TelegramDownloadLimitError extends Error {
   constructor(maxDownloadBytes: number) {
@@ -143,6 +147,34 @@ const selectMedia = (
       `telegram-document-${message.messageId}.${MIME_TYPE_EXTENSIONS[mimeType]}`,
     ),
     mimeType,
+  };
+};
+
+const MAX_TELEGRAM_NAME_LENGTH = 128;
+const MAX_TELEGRAM_USERNAME_LENGTH = 64;
+
+/** Keeps optional identity fields within the contract the API accepts. */
+const identityField = (
+  value: string | undefined,
+  maxLength: number,
+): string | undefined => {
+  const trimmed = value?.trim();
+
+  return trimmed ? trimmed.slice(0, maxLength) : undefined;
+};
+
+const toRegistration = (
+  user: TelegramUser,
+): TelegramContributorRegistration => {
+  const firstName = identityField(user.firstName, MAX_TELEGRAM_NAME_LENGTH);
+  const lastName = identityField(user.lastName, MAX_TELEGRAM_NAME_LENGTH);
+  const username = identityField(user.username, MAX_TELEGRAM_USERNAME_LENGTH);
+
+  return {
+    telegramUserId: String(user.id),
+    ...(firstName === undefined ? {} : { firstName }),
+    ...(lastName === undefined ? {} : { lastName }),
+    ...(username === undefined ? {} : { username }),
   };
 };
 
@@ -273,14 +305,49 @@ export const createTelegramIngestionHandler = (
       chatId: message.chatId,
     };
 
-    if (!options.allowedUserIds.has(message.from.id)) {
-      options.logger.warn(logContext, 'Rejected media from unauthorized user');
+    let status: TelegramContributorStatus;
+
+    // Registering first means an unknown contributor becomes a reviewable
+    // access request without the bot looking up or downloading anything.
+    try {
+      const contributor = await withTimeout(
+        () =>
+          options.homeGalleryClient.registerTelegramContributor(
+            toRegistration(message.from),
+          ),
+        options.requestTimeoutMs,
+        'Home Gallery contributor registration',
+      );
+      status = contributor.status;
+    } catch (error) {
+      options.logger.error(
+        {
+          ...logContext,
+          ...safeErrorFields(error, options.secrets ?? []),
+        },
+        'Could not register the Telegram contributor; the message was retained',
+      );
       await attemptReply(
         options,
         message,
-        'You are not authorized to upload media to this gallery.',
+        'The gallery could not be reached. Your original message was kept so it can be retried.',
       );
-      return 'rejected';
+      return 'failed';
+    }
+
+    if (status !== 'approved') {
+      options.logger.info(
+        { ...logContext, status },
+        'Ignored media from a contributor without approval',
+      );
+      await attemptReply(
+        options,
+        message,
+        status === 'pending'
+          ? 'Your access request is waiting for the gallery administrator. You can send photos once it is approved.'
+          : 'You are not authorized to upload media to this gallery.',
+      );
+      return status === 'pending' ? 'pending' : 'rejected';
     }
 
     const selectedMedia = selectMedia(message);
@@ -290,7 +357,7 @@ export const createTelegramIngestionHandler = (
       await attemptReply(
         options,
         message,
-        'This file type is not supported. Send a JPEG, PNG, WebP, HEIC, or HEIF image.',
+        'Send a JPEG, PNG, WebP, HEIC, or HEIF image to add it to the gallery.',
       );
       return 'unsupported';
     }

@@ -56,6 +56,8 @@ The planned MVP API is:
 | `GET`    | `/api/settings`   | Administration token | Read gallery settings                       |
 | `PATCH`  | `/api/settings`   | Administration token | Update gallery settings                     |
 
+Post-MVP issue #26 adds `/api/telegram/contributors` so contributor access is granted in the administration application instead of in deployment configuration.
+
 The MVP initially used one bearer token. Post-MVP issue #21 separates bot ingestion and administrative operations into independently rotatable credentials while preserving these route boundaries. Post-MVP issue #24 keeps bearer support for API clients while replacing browser bearer storage with bounded, short-lived administration sessions.
 
 ## 4. Data model
@@ -69,7 +71,7 @@ Each media record contains:
 - enabled state and explicit sort order;
 - width and height.
 
-SQLite stores metadata and settings. Media bytes live under a configurable data directory mounted as a persistent Docker volume. Database writes and file moves must avoid leaving a record without a file or an untracked permanent file after a failed request.
+SQLite stores metadata, settings, and Telegram contributor approval state. Media bytes live under a configurable data directory mounted as a persistent Docker volume. Database writes and file moves must avoid leaving a record without a file or an untracked permanent file after a failed request.
 
 Initial gallery settings are slide duration, fade duration, and sequential or shuffled playback.
 
@@ -136,7 +138,7 @@ High-risk behavior requires focused tests:
 - upload type, size, integrity, and image-orientation handling;
 - authorization on all mutation and administration endpoints;
 - atomic media/database deletion and upload failure recovery;
-- Telegram allowlisting and deletion only after confirmed server success;
+- Telegram contributor approval and deletion only after confirmed server success;
 - gallery recovery from an empty or temporarily unreachable playlist;
 - data persistence across container restarts.
 

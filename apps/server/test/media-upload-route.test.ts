@@ -13,11 +13,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import {
+  approveTestContributor,
   createTemporaryDataDirectory,
   createTestConfig,
   removeTemporaryDataDirectory,
   TEST_INGESTION_TOKEN,
 } from './helpers.js';
+
+const APPROVED_TELEGRAM_USER_ID = '123456';
 
 interface MultipartField {
   name: string;
@@ -86,7 +89,7 @@ const validFields = (
   Object.entries({
     originalFilename: 'family-photo.png',
     source: 'telegram',
-    sourceId: '123456',
+    sourceId: APPROVED_TELEGRAM_USER_ID,
     authorName: 'Gallery contributor',
     ...overrides,
   }).map(([name, value]) => ({ name, value }));
@@ -113,6 +116,7 @@ describe('POST /api/media', () => {
   beforeEach(async () => {
     dataDirectory = await createTemporaryDataDirectory();
     app = await createApp(createTestConfig(dataDirectory));
+    approveTestContributor(app, APPROVED_TELEGRAM_USER_ID);
   });
 
   afterEach(async () => {
@@ -254,6 +258,78 @@ describe('POST /api/media', () => {
       issues: [{ path: 'file' }],
     });
     await expectEmptyStorage();
+  });
+
+  it.each([
+    ['a pending contributor', '654321'],
+    ['an unknown contributor', '999999'],
+    ['an unidentified sender', undefined],
+  ])('refuses Telegram media from %s', async (_case, sourceId) => {
+    app.telegramContributorRepository.register({ telegramUserId: '654321' });
+
+    const response = await upload(
+      validFields()
+        .filter((field) => sourceId !== undefined || field.name !== 'sourceId')
+        .map((field) =>
+          field.name === 'sourceId' && sourceId !== undefined
+            ? { ...field, value: sourceId }
+            : field,
+        ),
+      {
+        bytes: await createImage('png'),
+        filename: 'family-photo.png',
+        mimeType: 'image/png',
+      },
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
+      'forbidden',
+    );
+    await expectEmptyStorage();
+  });
+
+  it('accepts Telegram media once the contributor is approved', async () => {
+    app.telegramContributorRepository.register({ telegramUserId: '654321' });
+
+    const pending = await upload(validFields({ sourceId: '654321' }), {
+      bytes: await createImage('png'),
+      filename: 'family-photo.png',
+      mimeType: 'image/png',
+    });
+    expect(pending.statusCode).toBe(403);
+
+    app.telegramContributorRepository.decide('654321', 'approved');
+
+    const approved = await upload(validFields({ sourceId: '654321' }), {
+      bytes: await createImage('png'),
+      filename: 'family-photo.png',
+      mimeType: 'image/png',
+    });
+
+    expect(approved.statusCode).toBe(201);
+    expect(mediaRecordSchema.parse(approved.json()).sourceId).toBe('654321');
+  });
+
+  it('stores an administration upload without a Telegram contributor', async () => {
+    await app.close();
+    app = await createApp(
+      createTestConfig(dataDirectory, { allowAdministrationUploads: true }),
+    );
+
+    const response = await upload(
+      [
+        { name: 'originalFilename', value: 'family-photo.png' },
+        { name: 'source', value: 'admin' },
+      ],
+      {
+        bytes: await createImage('png'),
+        filename: 'family-photo.png',
+        mimeType: 'image/png',
+      },
+    );
+
+    expect(response.statusCode).toBe(201);
   });
 
   it('rejects supported-by-Sharp formats outside the upload allowlist', async () => {
