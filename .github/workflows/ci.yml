@@ -140,13 +140,13 @@ jobs:
       - name: Connect to Tailscale
         uses: tailscale/github-action@v4
         with:
-          oauth-client-id: ${{ secrets.HOME_GALLERY_TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.HOME_GALLERY_TS_OAUTH_SECRET }}
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
       - name: Configure SSH
         env:
-          DEPLOY_KEY: ${{ secrets.HOME_GALLERY_DEPLOY_SSH_KEY }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
           install -d -m 700 ~/.ssh
@@ -156,8 +156,8 @@ jobs:
       - name: Discover the deployment directory
         id: remote
         env:
-          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEV_SSH_USER }}
         run: |
           set -euo pipefail
           test -n "$DEPLOY_HOST"
@@ -170,8 +170,8 @@ jobs:
 
       - name: Log the deployment host in to GHCR
         env:
-          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEV_SSH_USER }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
@@ -184,8 +184,8 @@ jobs:
       - name: Sync deployment files
         env:
           DEPLOY_DIR: ${{ steps.remote.outputs.directory }}
-          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEV_SSH_USER }}
         run: |
           set -euo pipefail
           rsync -az \
@@ -203,12 +203,12 @@ jobs:
 
       - name: Install runtime configuration
         env:
-          ADMIN_TOKEN: ${{ secrets.HOME_GALLERY_ADMIN_TOKEN }}
-          ADMIN_TOKEN_PREVIOUS: ${{ secrets.HOME_GALLERY_ADMIN_TOKEN_PREVIOUS }}
-          INGESTION_TOKEN: ${{ secrets.HOME_GALLERY_INGESTION_TOKEN }}
-          INGESTION_TOKEN_PREVIOUS: ${{ secrets.HOME_GALLERY_INGESTION_TOKEN_PREVIOUS }}
-          BOT_TOKEN: ${{ secrets.HOME_GALLERY_TELEGRAM_BOT_TOKEN }}
-          ALLOWED_USER_IDS: ${{ secrets.HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          ADMIN_TOKEN_PREVIOUS: ${{ secrets.ADMIN_TOKEN_PREVIOUS }}
+          INGESTION_TOKEN: ${{ secrets.INGESTION_TOKEN }}
+          INGESTION_TOKEN_PREVIOUS: ${{ secrets.INGESTION_TOKEN_PREVIOUS }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ALLOWED_USER_IDS: ${{ secrets.TELEGRAM_ALLOWED_USER_IDS }}
           GALLERY_PORT: ${{ vars.HOME_GALLERY_GALLERY_PORT || '3010' }}
           ADMIN_PORT: ${{ vars.HOME_GALLERY_ADMIN_PORT || '3011' }}
           API_PORT: ${{ vars.HOME_GALLERY_API_PORT || '3012' }}
@@ -227,8 +227,8 @@ jobs:
           UPLOAD_RATE_LIMIT_WINDOW_MS: ${{ vars.HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS || '60000' }}
           TRUSTED_PROXIES: ${{ vars.HOME_GALLERY_TRUSTED_PROXIES }}
           DEPLOY_DIR: ${{ steps.remote.outputs.directory }}
-          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEV_SSH_USER }}
         run: |
           set -euo pipefail
           test -n "$ADMIN_TOKEN"
@@ -282,8 +282,8 @@ jobs:
       - name: Deploy and verify health
         env:
           DEPLOY_DIR: ${{ steps.remote.outputs.directory }}
-          DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEV_SSH_USER }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/home_gallery_ed25519 \
