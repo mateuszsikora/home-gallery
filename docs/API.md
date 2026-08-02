@@ -4,7 +4,8 @@ The shared runtime schemas and TypeScript types live in `@home-gallery/shared-ty
 
 ## Conventions
 
-- Protected routes require `Authorization: Bearer <token>`. Administration and ingestion use independent credentials, and tokens are never accepted in a URL.
+- Protected routes accept `Authorization: Bearer <token>`. Administration and ingestion use independent credentials, and tokens are never accepted in a URL. Administration routes also accept a valid browser session cookie created by the session endpoint.
+- Cookie-authenticated `POST`, `PATCH`, and `DELETE` requests require `X-Home-Gallery-CSRF: 1`. Bearer clients do not need this header.
 - JSON requests use `Content-Type: application/json` and JSON responses use `Content-Type: application/json`.
 - Timestamps are ISO 8601 UTC strings.
 - Media IDs are UUIDs. Pagination cursors are opaque and clients must return them unchanged.
@@ -34,18 +35,33 @@ Every non-successful response uses this shape:
 
 ## Routes
 
-| Method   | Path              | Access | Request                             | Successful response                |
-| -------- | ----------------- | ------ | ----------------------------------- | ---------------------------------- |
-| `GET`    | `/health`         | Public | None                                | Health status                      |
-| `POST`   | `/api/media`      | Ingest | Multipart image and attribution     | Media record                       |
-| `GET`    | `/api/media`      | Admin  | Optional `cursor` and `limit` query | Paginated media list               |
-| `GET`    | `/api/media/{id}` | Admin  | None                                | Media record                       |
-| `PATCH`  | `/api/media/{id}` | Admin  | Non-empty media update              | Updated media record               |
-| `DELETE` | `/api/media/{id}` | Admin  | None                                | `204 No Content`                   |
-| `GET`    | `/api/playlist`   | Public | None                                | Enabled media and gallery settings |
-| `GET`    | `/media/{id}`     | Public | None                                | Normalized image bytes             |
-| `GET`    | `/api/settings`   | Admin  | None                                | Gallery settings                   |
-| `PATCH`  | `/api/settings`   | Admin  | Non-empty settings update           | Updated gallery settings           |
+| Method   | Path                 | Access        | Request                             | Successful response                |
+| -------- | -------------------- | ------------- | ----------------------------------- | ---------------------------------- |
+| `POST`   | `/api/admin/session` | Admin bearer  | None                                | Session expiry                     |
+| `GET`    | `/api/admin/session` | Admin session | None                                | Session expiry                     |
+| `DELETE` | `/api/admin/session` | Admin session | CSRF header                         | `204 No Content`                   |
+| `GET`    | `/health`            | Public        | None                                | Health status                      |
+| `POST`   | `/api/media`         | Ingest        | Multipart image and attribution     | Media record                       |
+| `GET`    | `/api/media`         | Admin         | Optional `cursor` and `limit` query | Paginated media list               |
+| `GET`    | `/api/media/{id}`    | Admin         | None                                | Media record                       |
+| `PATCH`  | `/api/media/{id}`    | Admin         | Non-empty media update              | Updated media record               |
+| `DELETE` | `/api/media/{id}`    | Admin         | None                                | `204 No Content`                   |
+| `GET`    | `/api/playlist`      | Public        | None                                | Enabled media and gallery settings |
+| `GET`    | `/media/{id}`        | Public        | None                                | Normalized image bytes             |
+| `GET`    | `/api/settings`      | Admin         | None                                | Gallery settings                   |
+| `PATCH`  | `/api/settings`      | Admin         | Non-empty settings update           | Updated gallery settings           |
+
+### Browser administration session
+
+`POST /api/admin/session` validates an administration bearer and returns `201 Created` while setting an opaque `home_gallery_admin_session` cookie. The cookie is `HttpOnly`, `SameSite=Strict`, scoped to `/`, and marked `Secure` in the supported TLS profile. The response exposes only the server-side expiry:
+
+```json
+{
+  "expiresAt": "2026-08-02T12:00:00.000Z"
+}
+```
+
+`GET /api/admin/session` restores a valid cookie session. `DELETE /api/admin/session` requires `X-Home-Gallery-CSRF: 1`, removes the server-side session, clears the cookie, and returns `204 No Content`. Sessions are held only in bounded process memory: the default lifetime is eight hours, the default capacity is 64, the oldest live session is evicted at capacity, and every server restart invalidates all sessions. The administration bearer remains supported directly on protected routes for non-browser API clients.
 
 ### Health
 

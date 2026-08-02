@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   API_ERROR_STATUS,
+  API_ROUTES,
   DEFAULT_GALLERY_SETTINGS,
+  adminSessionSchema,
   apiErrorBodySchema,
   createApiErrorBody,
   gallerySettingsSchema,
@@ -120,5 +122,17 @@ describe('error contracts', () => {
 
     expect(apiErrorBodySchema.parse(body)).toEqual(body);
     expect(API_ERROR_STATUS[body.error.code]).toBe(422);
+  });
+});
+
+describe('administration session contract', () => {
+  it('accepts only an ISO expiry timestamp on the documented route', () => {
+    const session = { expiresAt: '2026-08-02T12:00:00.000Z' };
+
+    expect(adminSessionSchema.parse(session)).toEqual(session);
+    expect(
+      adminSessionSchema.safeParse({ expiresAt: 'tomorrow' }).success,
+    ).toBe(false);
+    expect(API_ROUTES.adminSession).toBe('/api/admin/session');
   });
 });

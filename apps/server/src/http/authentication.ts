@@ -1,12 +1,23 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-import type { FastifyInstance, onRequestHookHandler } from 'fastify';
+import {
+  ADMIN_SESSION_CSRF_HEADER,
+  ADMIN_SESSION_CSRF_VALUE,
+} from '@home-gallery/shared-types';
+import type {
+  FastifyInstance,
+  FastifyRequest,
+  onRequestHookHandler,
+} from 'fastify';
 
+import type { AdminSessionStore } from './admin-session-store.js';
+import { ADMIN_SESSION_COOKIE_NAME } from './admin-session-routes.js';
 import { ApiError } from './errors.js';
 import { rejectWhenRateLimited } from './rate-limit.js';
 import type { FixedWindowRateLimiter } from './rate-limit.js';
 
 const BEARER_SCHEME = 'bearer';
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
  * Compares two secrets without leaking their contents through timing. Hashing
@@ -39,10 +50,27 @@ const readBearerToken = (header: string | undefined): string | undefined => {
   return token.length > 0 ? token : undefined;
 };
 
+const matchesAny = (
+  candidate: string | undefined,
+  expectedTokens: readonly string[],
+): boolean =>
+  candidate !== undefined &&
+  expectedTokens.some((expected) => secretsMatch(candidate, expected));
+
+const hasValidCsrfHeader = (request: FastifyRequest): boolean =>
+  request.headers[ADMIN_SESSION_CSRF_HEADER] === ADMIN_SESSION_CSRF_VALUE;
+
 declare module 'fastify' {
   interface FastifyInstance {
+    requireAdministrationBearerToken: onRequestHookHandler;
+    requireAdministrationSession: onRequestHookHandler;
     requireAdministrationToken: onRequestHookHandler;
     requireIngestionToken: onRequestHookHandler;
+  }
+
+  interface FastifyRequest {
+    administrationAuthentication: 'bearer' | 'session' | null;
+    administrationSessionExpiresAt: number | null;
   }
 }
 
@@ -53,61 +81,113 @@ export const registerAuthentication = (
     ingestionTokens: readonly string[];
     allowAdministrationUploads: boolean;
     failureLimiter: FixedWindowRateLimiter;
+    sessionStore: AdminSessionStore;
   },
 ): void => {
-  const createGuard =
-    (
-      scope: 'administration' | 'ingestion',
-      expectedTokens: readonly string[],
-    ): onRequestHookHandler =>
-    (request, reply, done) => {
-      const token = readBearerToken(request.headers.authorization);
+  app.decorateRequest('administrationAuthentication', null);
+  app.decorateRequest('administrationSessionExpiresAt', null);
 
-      if (
-        token !== undefined &&
-        expectedTokens.some((expected) => secretsMatch(token, expected))
-      ) {
-        done();
-        return;
-      }
+  const reject = (
+    request: FastifyRequest,
+    reply: Parameters<onRequestHookHandler>[1],
+    scope: 'administration' | 'ingestion',
+  ): never => {
+    const result = options.failureLimiter.consume(request.ip);
 
-      try {
-        const result = options.failureLimiter.consume(request.ip);
+    if (!result.allowed && result.firstRejection) {
+      request.log.warn(
+        {
+          clientAddress: request.ip,
+          limit: options.failureLimiter.config.max,
+          scope,
+          windowMs: options.failureLimiter.config.windowMs,
+        },
+        'Authentication failure limit reached',
+      );
+    }
 
-        if (!result.allowed && result.firstRejection) {
-          request.log.warn(
-            {
-              clientAddress: request.ip,
-              limit: options.failureLimiter.config.max,
-              scope,
-              windowMs: options.failureLimiter.config.windowMs,
-            },
-            'Authentication failure limit reached',
-          );
-        }
+    rejectWhenRateLimited(
+      result,
+      reply,
+      'Too many invalid authentication attempts',
+    );
+    throw new ApiError(
+      'unauthorized',
+      'A valid bearer token or administration session is required',
+    );
+  };
 
-        rejectWhenRateLimited(
-          result,
-          reply,
-          'Too many invalid authentication attempts',
-        );
-        done(new ApiError('unauthorized', 'A valid bearer token is required'));
-      } catch (error) {
-        done(error as Error);
-      }
-    };
+  const acceptAdministrationBearer = (request: FastifyRequest): boolean => {
+    if (
+      !matchesAny(
+        readBearerToken(request.headers.authorization),
+        options.administrationTokens,
+      )
+    ) {
+      return false;
+    }
 
-  app.decorate(
-    'requireAdministrationToken',
-    createGuard('administration', options.administrationTokens),
-  );
-  app.decorate(
-    'requireIngestionToken',
-    createGuard('ingestion', [
-      ...options.ingestionTokens,
-      ...(options.allowAdministrationUploads
-        ? options.administrationTokens
-        : []),
-    ]),
-  );
+    request.administrationAuthentication = 'bearer';
+    return true;
+  };
+
+  const acceptAdministrationSession = (request: FastifyRequest): boolean => {
+    const record = options.sessionStore.read(
+      request.cookies[ADMIN_SESSION_COOKIE_NAME],
+    );
+
+    if (record === undefined) {
+      return false;
+    }
+
+    if (!SAFE_METHODS.has(request.method) && !hasValidCsrfHeader(request)) {
+      throw new ApiError(
+        'forbidden',
+        `Cookie-authenticated mutations require ${ADMIN_SESSION_CSRF_HEADER}`,
+      );
+    }
+
+    request.administrationAuthentication = 'session';
+    request.administrationSessionExpiresAt = record.expiresAt;
+    return true;
+  };
+
+  app.decorate('requireAdministrationBearerToken', (async (request, reply) => {
+    if (!acceptAdministrationBearer(request)) {
+      reject(request, reply, 'administration');
+    }
+  }) satisfies onRequestHookHandler);
+
+  app.decorate('requireAdministrationSession', (async (request, reply) => {
+    if (!acceptAdministrationSession(request)) {
+      reject(request, reply, 'administration');
+    }
+  }) satisfies onRequestHookHandler);
+
+  app.decorate('requireAdministrationToken', (async (request, reply) => {
+    if (
+      !acceptAdministrationBearer(request) &&
+      !acceptAdministrationSession(request)
+    ) {
+      reject(request, reply, 'administration');
+    }
+  }) satisfies onRequestHookHandler);
+
+  app.decorate('requireIngestionToken', (async (request, reply) => {
+    const bearer = readBearerToken(request.headers.authorization);
+
+    if (matchesAny(bearer, options.ingestionTokens)) {
+      return;
+    }
+
+    if (
+      options.allowAdministrationUploads &&
+      (acceptAdministrationBearer(request) ||
+        acceptAdministrationSession(request))
+    ) {
+      return;
+    }
+
+    reject(request, reply, 'ingestion');
+  }) satisfies onRequestHookHandler);
 };

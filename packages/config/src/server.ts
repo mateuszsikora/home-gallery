@@ -18,6 +18,8 @@ export const DEFAULT_AUTH_RATE_LIMIT_MAX = 10;
 export const DEFAULT_AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
 export const DEFAULT_UPLOAD_RATE_LIMIT_MAX = 30;
 export const DEFAULT_UPLOAD_RATE_LIMIT_WINDOW_MS = 60_000;
+export const DEFAULT_ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1_000;
+export const DEFAULT_ADMIN_SESSION_MAX = 64;
 
 export const MIN_API_TOKEN_LENGTH = 32;
 export const MAX_API_TOKEN_LENGTH = 512;
@@ -27,10 +29,19 @@ export const MAX_MAX_STORED_FILES = 1_000_000;
 export const MAX_RATE_LIMIT_REQUESTS = 100_000;
 export const MIN_RATE_LIMIT_WINDOW_MS = 1_000;
 export const MAX_RATE_LIMIT_WINDOW_MS = 86_400_000;
+export const MIN_ADMIN_SESSION_TTL_MS = 60_000;
+export const MAX_ADMIN_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+export const MAX_ADMIN_SESSIONS = 10_000;
 
 export interface RateLimitConfig {
   max: number;
   windowMs: number;
+}
+
+export interface AdminSessionConfig {
+  max: number;
+  secure: boolean;
+  ttlMs: number;
 }
 
 /** Matches the levels accepted by the server's pino logger. */
@@ -57,6 +68,7 @@ export interface ServerConfig {
   administrationTokens: readonly string[];
   ingestionTokens: readonly string[];
   allowAdministrationUploads: boolean;
+  adminSession: AdminSessionConfig;
   authenticationRateLimit: RateLimitConfig;
   uploadRateLimit: RateLimitConfig;
   /** IP addresses and CIDRs of proxies allowed to supply forwarding headers. */
@@ -215,6 +227,15 @@ const serverEnvSchema = z.object({
   HOME_GALLERY_INGESTION_TOKEN: credentialTokenSchema,
   HOME_GALLERY_INGESTION_TOKEN_PREVIOUS: credentialTokenSchema.optional(),
   HOME_GALLERY_ALLOW_ADMIN_UPLOADS: booleanVariable.optional(),
+  HOME_GALLERY_ADMIN_SESSION_TTL_MS: integerVariable(
+    MIN_ADMIN_SESSION_TTL_MS,
+    MAX_ADMIN_SESSION_TTL_MS,
+  ).optional(),
+  HOME_GALLERY_ADMIN_SESSION_MAX: integerVariable(
+    1,
+    MAX_ADMIN_SESSIONS,
+  ).optional(),
+  HOME_GALLERY_ADMIN_SESSION_SECURE: booleanVariable.optional(),
   HOME_GALLERY_AUTH_RATE_LIMIT_MAX: integerVariable(
     1,
     MAX_RATE_LIMIT_REQUESTS,
@@ -319,6 +340,13 @@ export const loadServerConfig = (
     ],
     allowAdministrationUploads:
       values.HOME_GALLERY_ALLOW_ADMIN_UPLOADS ?? false,
+    adminSession: {
+      max: values.HOME_GALLERY_ADMIN_SESSION_MAX ?? DEFAULT_ADMIN_SESSION_MAX,
+      secure: values.HOME_GALLERY_ADMIN_SESSION_SECURE ?? false,
+      ttlMs:
+        values.HOME_GALLERY_ADMIN_SESSION_TTL_MS ??
+        DEFAULT_ADMIN_SESSION_TTL_MS,
+    },
     authenticationRateLimit: {
       max:
         values.HOME_GALLERY_AUTH_RATE_LIMIT_MAX ?? DEFAULT_AUTH_RATE_LIMIT_MAX,

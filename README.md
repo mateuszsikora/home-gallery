@@ -57,14 +57,14 @@ Open the Vite URL shown in the terminal. The API URL defaults to the gallery pag
 
 ### Running the administration application
 
-The administration application uses the same API URL and asks for the administration bearer token in the browser. The token is kept in `sessionStorage`, is never included in a URL, and is removed when the studio is locked or the tab session ends. Administration uploads are disabled by default so that credential cannot call the ingestion-only endpoint; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
+The administration application uses the same API URL and asks for the administration bearer token once to create a short-lived server session. The token is never put in browser storage or a URL; subsequent requests use an opaque `HttpOnly`, `SameSite=Strict` cookie and an explicit anti-CSRF header for mutations. The in-memory session expires after eight hours by default, is invalidated by a server restart or the **Lock studio** action, and uses `Secure` automatically in the supported TLS profile. Administration uploads are disabled by default; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
 
 ```bash
 VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
 npm run dev --workspace @home-gallery/admin -- --port 3011
 ```
 
-When the API and administration application use different origins during local development, include the administration origin in `HOME_GALLERY_ALLOWED_ORIGINS` before starting the server. For the command above, use `HOME_GALLERY_ALLOWED_ORIGINS=http://localhost:3011`. In production, a reverse proxy can serve the API and administration application from one origin.
+When the API and administration application use different origins during local development, include the administration origin in `HOME_GALLERY_ALLOWED_ORIGINS` before starting the server. For the command above, use `HOME_GALLERY_ALLOWED_ORIGINS=http://localhost:3011`. Cookie sessions require the two origins to remain same-site; the documented localhost ports satisfy that requirement. In production, the bundled reverse proxy serves the API and administration application from one origin.
 
 ### Running the Telegram bot
 

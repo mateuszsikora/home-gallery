@@ -4,6 +4,7 @@ export * from './database/media-repository.js';
 export * from './database/migrations.js';
 export * from './database/settings-repository.js';
 export * from './http/authentication.js';
+export * from './http/admin-session-store.js';
 export * from './http/errors.js';
 export * from './http/health-route.js';
 export * from './http/media-upload-route.js';

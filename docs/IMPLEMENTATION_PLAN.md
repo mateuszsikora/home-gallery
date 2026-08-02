@@ -56,7 +56,7 @@ The planned MVP API is:
 | `GET`    | `/api/settings`   | Administration token | Read gallery settings                       |
 | `PATCH`  | `/api/settings`   | Administration token | Update gallery settings                     |
 
-The MVP initially used one bearer token. Post-MVP issue #21 separates bot ingestion and administrative operations into independently rotatable credentials while preserving these route boundaries.
+The MVP initially used one bearer token. Post-MVP issue #21 separates bot ingestion and administrative operations into independently rotatable credentials while preserving these route boundaries. Post-MVP issue #24 keeps bearer support for API clients while replacing browser bearer storage with bounded, short-lived administration sessions.
 
 ## 4. Data model
 

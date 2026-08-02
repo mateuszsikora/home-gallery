@@ -18,11 +18,12 @@ import type {
   PlaybackMode,
 } from '@home-gallery/shared-types';
 
-export const SESSION_TOKEN_KEY = 'home-gallery.admin.token';
-
 export type AdminClient = Pick<
   HomeGalleryClient,
+  | 'createAdminSession'
+  | 'deleteAdminSession'
   | 'deleteMedia'
+  | 'getAdminSession'
   | 'getMediaContentUrl'
   | 'getSettings'
   | 'listMedia'
@@ -33,8 +34,7 @@ export type AdminClient = Pick<
 
 export interface AdminAppProps {
   readonly apiBaseUrl: string;
-  readonly createClient?: (token: string) => AdminClient;
-  readonly storage?: Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>;
+  readonly createClient?: () => AdminClient;
 }
 
 interface SettingsDraft {
@@ -155,15 +155,9 @@ const StatusMessage = ({
 export const AdminApp = ({
   apiBaseUrl,
   createClient,
-  storage,
 }: AdminAppProps): ReactElement => {
-  const sessionStorage = storage ?? window.sessionStorage;
-  const initialCredential = sessionStorage.getItem(SESSION_TOKEN_KEY) ?? '';
-  const [credential, setCredential] = useState(initialCredential);
   const [tokenInput, setTokenInput] = useState('');
-  const [phase, setPhase] = useState<Phase>(
-    initialCredential === '' ? 'signed-out' : 'loading',
-  );
+  const [phase, setPhase] = useState<Phase>('loading');
   const [media, setMedia] = useState<MediaRecord[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>();
   const [busyAction, setBusyAction] = useState<string>();
@@ -180,31 +174,30 @@ export const AdminApp = ({
   const clientFactory = useMemo(
     () =>
       createClient ??
-      ((token: string): AdminClient =>
-        createHomeGalleryClient({ baseUrl: apiBaseUrl, token })),
+      ((): AdminClient =>
+        createHomeGalleryClient({
+          baseUrl: apiBaseUrl,
+          useAdminSession: true,
+        })),
     [apiBaseUrl, createClient],
   );
-  const client = useMemo(
-    () => (credential === '' ? undefined : clientFactory(credential)),
-    [clientFactory, credential],
-  );
+  const client = useMemo(() => clientFactory(), [clientFactory]);
 
   useEffect(() => {
-    if (client === undefined) {
-      return;
-    }
-
     let cancelled = false;
     setPhase('loading');
     setError(undefined);
 
-    void Promise.all([listAllMedia(client), client.getSettings()])
+    void client
+      .getAdminSession()
+      .then(async () =>
+        Promise.all([listAllMedia(client), client.getSettings()]),
+      )
       .then(([nextMedia, nextSettings]) => {
         if (cancelled) {
           return;
         }
 
-        sessionStorage.setItem(SESSION_TOKEN_KEY, credential);
         setMedia(nextMedia);
         setSettingsDraft(toSettingsDraft(nextSettings));
         setPhase('ready');
@@ -215,20 +208,18 @@ export const AdminApp = ({
           return;
         }
 
-        sessionStorage.removeItem(SESSION_TOKEN_KEY);
-        setCredential('');
         setPhase('signed-out');
-        setError(
-          isUnauthorized(reason)
-            ? 'That access token was rejected. Check the token and try again.'
-            : `The administration data could not be loaded. ${errorDetail(reason)}`,
-        );
+        if (!isUnauthorized(reason)) {
+          setError(
+            `The administration session could not be restored. ${errorDetail(reason)}`,
+          );
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [client, credential, sessionStorage]);
+  }, [client]);
 
   useEffect(() => {
     if (deleteCandidate !== undefined) {
@@ -248,8 +239,6 @@ export const AdminApp = ({
   };
 
   const signOut = (message?: string): void => {
-    sessionStorage.removeItem(SESSION_TOKEN_KEY);
-    setCredential('');
     setTokenInput('');
     setMedia([]);
     setSettingsDraft(undefined);
@@ -269,7 +258,9 @@ export const AdminApp = ({
     setError(`${context} ${errorDetail(reason)}`);
   };
 
-  const authenticate = (event: FormEvent<HTMLFormElement>): void => {
+  const authenticate = async (
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> => {
     event.preventDefault();
     clearMessages();
     const trimmedToken = tokenInput.trim();
@@ -279,7 +270,43 @@ export const AdminApp = ({
       return;
     }
 
-    setCredential(trimmedToken);
+    setTokenInput('');
+    setPhase('loading');
+
+    try {
+      await client.createAdminSession(trimmedToken);
+      const [nextMedia, nextSettings] = await Promise.all([
+        listAllMedia(client),
+        client.getSettings(),
+      ]);
+      setMedia(nextMedia);
+      setSettingsDraft(toSettingsDraft(nextSettings));
+      setPhase('ready');
+    } catch (reason) {
+      setPhase('signed-out');
+      setError(
+        isUnauthorized(reason)
+          ? 'That access token was rejected. Check the token and try again.'
+          : `The administration data could not be loaded. ${errorDetail(reason)}`,
+      );
+    }
+  };
+
+  const endSession = async (): Promise<void> => {
+    clearMessages();
+    setBusyAction('logout');
+
+    try {
+      await client.deleteAdminSession();
+      signOut();
+    } catch (reason) {
+      if (isUnauthorized(reason)) {
+        signOut();
+      } else {
+        setError(`The studio could not be locked. ${errorDetail(reason)}`);
+        setBusyAction(undefined);
+      }
+    }
   };
 
   const uploadMedia = async (
@@ -490,11 +517,14 @@ export const AdminApp = ({
           <p className="eyebrow">Home Gallery / Admin</p>
           <h1 id="login-title">Your walls, in your hands.</h1>
           <p className="login-card__intro">
-            Enter the private API access token to curate photos and tune the
-            gallery. It stays in this browser tab only.
+            Enter the private API access token to start a short-lived studio
+            session. The token itself is never stored by the browser.
           </p>
           <StatusMessage error={error} errorRef={errorRef} notice={notice} />
-          <form className="login-form" onSubmit={authenticate}>
+          <form
+            className="login-form"
+            onSubmit={(event) => void authenticate(event)}
+          >
             <label htmlFor="access-token">Access token</label>
             <div className="login-form__row">
               <input
@@ -516,8 +546,8 @@ export const AdminApp = ({
             </div>
           </form>
           <p className="security-note">
-            <span aria-hidden="true">●</span> The token is never added to a URL
-            or saved beyond this session.
+            <span aria-hidden="true">●</span> The server replaces the token with
+            an HttpOnly session cookie that application code cannot read.
           </p>
         </section>
       </main>
@@ -561,7 +591,7 @@ export const AdminApp = ({
           className="button button--quiet"
           disabled={actionInProgress}
           onClick={() => {
-            signOut();
+            void endSession();
           }}
           type="button"
         >

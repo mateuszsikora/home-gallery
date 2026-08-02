@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ADMIN_SESSION_CSRF_HEADER,
+  ADMIN_SESSION_CSRF_VALUE,
+} from '@home-gallery/shared-types';
+
+import {
   HomeGalleryApiError,
   HomeGalleryResponseError,
   createHomeGalleryClient,
@@ -80,6 +85,102 @@ describe('createHomeGalleryClient', () => {
     await client.getPlaylist();
 
     expect(authorization).toBeNull();
+  });
+
+  it('bootstraps a browser session without retaining the bearer in the client', async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> =
+      [];
+    const fetchImplementation: typeof fetch = async (input, init) => {
+      requests.push({ input, ...(init === undefined ? {} : { init }) });
+      return jsonResponse({ expiresAt: '2026-08-02T12:00:00.000Z' }, 201);
+    };
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test',
+      useAdminSession: true,
+      fetch: fetchImplementation,
+    });
+
+    await client.createAdminSession('  one-time-admin-token  ');
+
+    const request = requests[0];
+    expect(String(request?.input)).toBe(
+      'https://gallery.example.test/api/admin/session',
+    );
+    expect(String(request?.input)).not.toContain('one-time-admin-token');
+    expect(request?.init).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+    });
+    expect(new Headers(request?.init?.headers).get('authorization')).toBe(
+      'Bearer one-time-admin-token',
+    );
+    expect(
+      new Headers(request?.init?.headers).get(ADMIN_SESSION_CSRF_HEADER),
+    ).toBeNull();
+  });
+
+  it('uses included cookies and CSRF protection for session administration', async () => {
+    const requests: RequestInit[] = [];
+    const fetchImplementation: typeof fetch = async (input, init = {}) => {
+      requests.push(init);
+
+      if (String(input).endsWith('/api/admin/session')) {
+        return jsonResponse({ expiresAt: '2026-08-02T12:00:00.000Z' });
+      }
+
+      return jsonResponse(settings);
+    };
+    const settings = {
+      slideDurationMs: 8_000,
+      fadeDurationMs: 1_000,
+      playbackMode: 'sequential',
+    } as const;
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test',
+      useAdminSession: true,
+      fetch: fetchImplementation,
+    });
+
+    await client.getAdminSession();
+    await client.updateSettings({ slideDurationMs: 9_000 });
+
+    expect(requests[0]).toMatchObject({
+      method: 'GET',
+      credentials: 'include',
+    });
+    expect(
+      new Headers(requests[0]?.headers).get(ADMIN_SESSION_CSRF_HEADER),
+    ).toBeNull();
+    expect(requests[1]).toMatchObject({
+      method: 'PATCH',
+      credentials: 'include',
+    });
+    expect(new Headers(requests[1]?.headers).get('authorization')).toBeNull();
+    expect(
+      new Headers(requests[1]?.headers).get(ADMIN_SESSION_CSRF_HEADER),
+    ).toBe(ADMIN_SESSION_CSRF_VALUE);
+  });
+
+  it('clears a browser session with an explicit CSRF-protected request', async () => {
+    let requestInit: RequestInit | undefined;
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test',
+      useAdminSession: true,
+      fetch: async (_input, init) => {
+        requestInit = init;
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    await client.deleteAdminSession();
+
+    expect(requestInit).toMatchObject({
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    expect(
+      new Headers(requestInit?.headers).get(ADMIN_SESSION_CSRF_HEADER),
+    ).toBe(ADMIN_SESSION_CSRF_VALUE);
   });
 
   it('serializes upload metadata as multipart form data', async () => {
@@ -205,5 +306,12 @@ describe('createHomeGalleryClient', () => {
         token: '   ',
       }),
     ).toThrow('must not be empty');
+    expect(() =>
+      createHomeGalleryClient({
+        baseUrl: 'https://gallery.example.test',
+        token: 'secret-token',
+        useAdminSession: true,
+      }),
+    ).toThrow('either a bearer token or an administration session');
   });
 });
