@@ -6,6 +6,7 @@ import { message } from 'telegraf/filters';
 import {
   createTelegramIngestionHandler,
   type TelegramMediaMessage,
+  type TelegramUser,
 } from './ingestion.js';
 import {
   createConsoleLogger,
@@ -29,19 +30,32 @@ const timeoutFetch =
     return globalThis.fetch(input, { ...init, signal });
   };
 
+/** Telegraf reports an absent optional identity field as `undefined`. */
+const toSender = (from: {
+  id: number;
+  first_name: string;
+  last_name?: string | undefined;
+  username?: string | undefined;
+}): TelegramUser => ({
+  id: from.id,
+  firstName: from.first_name,
+  ...(from.last_name ? { lastName: from.last_name } : {}),
+  ...(from.username ? { username: from.username } : {}),
+});
+
 export const createTelegramBot = (
   config: TelegramBotConfig,
   logger: BotLogger = createConsoleLogger(),
 ): RunningTelegramBot => {
   const bot = new Telegraf(config.botToken, {
-    // Ingestion performs up to six sequential bounded operations, including a
-    // failure reply. Keep Telegraf's outer deadline above those inner limits so
-    // it never abandons a handler that is still completing its cleanup path.
-    handlerTimeout: config.requestTimeoutMs * 6 + 1_000,
+    // Ingestion performs up to seven sequential bounded operations, including
+    // contributor registration and a failure reply. Keep Telegraf's outer
+    // deadline above those inner limits so it never abandons a handler that is
+    // still completing its cleanup path.
+    handlerTimeout: config.requestTimeoutMs * 7 + 1_000,
   });
   const secrets = [config.botToken, config.ingestionToken];
   const ingestionHandler = createTelegramIngestionHandler({
-    allowedUserIds: config.allowedUserIds,
     homeGalleryClient: createHomeGalleryClient({
       baseUrl: config.apiUrl,
       token: config.ingestionToken,
@@ -69,12 +83,7 @@ export const createTelegramBot = (
     const incoming: TelegramMediaMessage = {
       chatId: context.chat.id,
       messageId: context.message.message_id,
-      from: {
-        id: context.from.id,
-        firstName: context.from.first_name,
-        ...(context.from.last_name ? { lastName: context.from.last_name } : {}),
-        ...(context.from.username ? { username: context.from.username } : {}),
-      },
+      from: toSender(context.from),
       photo: context.message.photo.map((photo) => ({
         fileId: photo.file_id,
         width: photo.width,
@@ -91,12 +100,7 @@ export const createTelegramBot = (
     const incoming: TelegramMediaMessage = {
       chatId: context.chat.id,
       messageId: context.message.message_id,
-      from: {
-        id: context.from.id,
-        firstName: context.from.first_name,
-        ...(context.from.last_name ? { lastName: context.from.last_name } : {}),
-        ...(context.from.username ? { username: context.from.username } : {}),
-      },
+      from: toSender(context.from),
       document: {
         fileId: document.file_id,
         ...(document.file_name ? { fileName: document.file_name } : {}),
@@ -105,6 +109,17 @@ export const createTelegramBot = (
     };
 
     await ingestionHandler(incoming);
+  });
+
+  // A text message carries no media, so it exists only to introduce a new
+  // contributor: the handler registers the access request and answers with its
+  // current state.
+  bot.on(message('text'), async (context) => {
+    await ingestionHandler({
+      chatId: context.chat.id,
+      messageId: context.message.message_id,
+      from: toSender(context.from),
+    });
   });
 
   bot.catch((error, context) => {

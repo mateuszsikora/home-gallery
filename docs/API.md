@@ -35,21 +35,24 @@ Every non-successful response uses this shape:
 
 ## Routes
 
-| Method   | Path                 | Access        | Request                             | Successful response                |
-| -------- | -------------------- | ------------- | ----------------------------------- | ---------------------------------- |
-| `POST`   | `/api/admin/session` | Admin bearer  | None                                | Session expiry                     |
-| `GET`    | `/api/admin/session` | Admin session | None                                | Session expiry                     |
-| `DELETE` | `/api/admin/session` | Admin session | CSRF header                         | `204 No Content`                   |
-| `GET`    | `/health`            | Public        | None                                | Health status                      |
-| `POST`   | `/api/media`         | Ingest        | Multipart image and attribution     | Media record                       |
-| `GET`    | `/api/media`         | Admin         | Optional `cursor` and `limit` query | Paginated media list               |
-| `GET`    | `/api/media/{id}`    | Admin         | None                                | Media record                       |
-| `PATCH`  | `/api/media/{id}`    | Admin         | Non-empty media update              | Updated media record               |
-| `DELETE` | `/api/media/{id}`    | Admin         | None                                | `204 No Content`                   |
-| `GET`    | `/api/playlist`      | Public        | None                                | Enabled media and gallery settings |
-| `GET`    | `/media/{id}`        | Public        | None                                | Normalized image bytes             |
-| `GET`    | `/api/settings`      | Admin         | None                                | Gallery settings                   |
-| `PATCH`  | `/api/settings`      | Admin         | Non-empty settings update           | Updated gallery settings           |
+| Method   | Path                                          | Access        | Request                             | Successful response                |
+| -------- | --------------------------------------------- | ------------- | ----------------------------------- | ---------------------------------- |
+| `POST`   | `/api/admin/session`                          | Admin bearer  | None                                | Session expiry                     |
+| `GET`    | `/api/admin/session`                          | Admin session | None                                | Session expiry                     |
+| `DELETE` | `/api/admin/session`                          | Admin session | CSRF header                         | `204 No Content`                   |
+| `GET`    | `/health`                                     | Public        | None                                | Health status                      |
+| `POST`   | `/api/media`                                  | Ingest        | Multipart image and attribution     | Media record                       |
+| `GET`    | `/api/media`                                  | Admin         | Optional `cursor` and `limit` query | Paginated media list               |
+| `GET`    | `/api/media/{id}`                             | Admin         | None                                | Media record                       |
+| `PATCH`  | `/api/media/{id}`                             | Admin         | Non-empty media update              | Updated media record               |
+| `DELETE` | `/api/media/{id}`                             | Admin         | None                                | `204 No Content`                   |
+| `GET`    | `/api/playlist`                               | Public        | None                                | Enabled media and gallery settings |
+| `GET`    | `/media/{id}`                                 | Public        | None                                | Normalized image bytes             |
+| `GET`    | `/api/settings`                               | Admin         | None                                | Gallery settings                   |
+| `PATCH`  | `/api/settings`                               | Admin         | Non-empty settings update           | Updated gallery settings           |
+| `POST`   | `/api/telegram/contributors`                  | Ingest        | Telegram identity                   | Contributor record                 |
+| `GET`    | `/api/telegram/contributors`                  | Admin         | None                                | Contributor list                   |
+| `PATCH`  | `/api/telegram/contributors/{telegramUserId}` | Admin         | Approval decision                   | Updated contributor record         |
 
 ### Browser administration session
 
@@ -163,6 +166,57 @@ An unknown or malformed media identifier is reported as `not_found`.
 Items are listed in playlist order. `settings.playbackMode` tells the client whether to play them in that order or to shuffle them, so the response itself stays deterministic.
 
 `GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response, and all three cases answer identically so an unauthenticated caller cannot tell them apart.
+
+### Telegram contributors
+
+Telegram contributors are approved by an administrator instead of being listed in deployment configuration. Their identifiers are exchanged as digit strings because a Telegram user ID may exceed the safe integer range.
+
+`POST /api/telegram/contributors` uses the ingestion credential and is how the bot reports a contact:
+
+```json
+{
+  "telegramUserId": "123456",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "username": "ada"
+}
+```
+
+Only `telegramUserId` is required, and the caller cannot propose a status. The route is an upsert: the first call records a pending access request, and every later call refreshes the identity Telegram reports without changing a decision an administrator already made. It answers `200` with the current record:
+
+```json
+{
+  "telegramUserId": "123456",
+  "status": "pending",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "username": "ada",
+  "requestedAt": "2026-08-01T10:00:00.000Z",
+  "updatedAt": "2026-08-01T10:00:00.000Z"
+}
+```
+
+`status` is `pending`, `approved`, or `rejected`. `requestedAt` is the first contact and never moves; `updatedAt` changes when the identity or the status really changes.
+
+`GET /api/telegram/contributors` returns every contributor to an administrator, pending requests first and the newest request first within a status. The list is deliberately not paginated:
+
+```json
+{
+  "items": []
+}
+```
+
+`PATCH /api/telegram/contributors/{telegramUserId}` accepts only a decided status and returns the complete updated record:
+
+```json
+{
+  "status": "approved"
+}
+```
+
+`pending` is rejected as a decision, and an unknown or malformed identifier is reported as `not_found`.
+
+`POST /api/media` with `source` set to `telegram` requires `sourceId` to name an approved contributor. Unidentified, unknown, pending, and rejected senders all receive `forbidden` so the caller learns nothing about the review queue.
 
 ### Settings
 

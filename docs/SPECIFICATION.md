@@ -104,7 +104,7 @@ The implementation plan may add supporting content, health, and configuration en
 
 ## 8. Administration panel
 
-The web administration interface provides a media list, previews, deletion, enable/disable controls, ordering, and gallery configuration.
+The web administration interface provides a media list, previews, deletion, enable/disable controls, ordering, gallery configuration, and review of Telegram contributor access requests.
 
 ## 9. Configuration
 
@@ -114,9 +114,10 @@ Configurable options include slide duration, transition duration, playback mode,
 
 ### 10.1 Telegram bot
 
-- Only authorized users may upload media.
+- Only approved users may upload media.
 - Users are identified by Telegram User ID.
-- Messages from unauthorized users are rejected.
+- The first contact from an unknown user is recorded as a pending access request that an administrator approves or rejects; their media is not downloaded in the meantime.
+- Messages from users who are not approved are rejected.
 - After Home Gallery confirms successful processing, the bot deletes the original Telegram message containing the uploaded media.
 - If processing fails, the message remains in the chat for retry or troubleshooting.
 

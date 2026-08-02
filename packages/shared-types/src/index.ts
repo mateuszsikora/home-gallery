@@ -6,3 +6,4 @@ export * from './media.js';
 export * from './playlist.js';
 export * from './routes.js';
 export * from './settings.js';
+export * from './telegram-contributors.js';

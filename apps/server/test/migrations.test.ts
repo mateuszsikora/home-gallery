@@ -20,8 +20,8 @@ describe('migrations', () => {
   });
 
   it('applies every migration on a fresh database', () => {
-    expect(migrate(database)).toEqual([1, 2]);
-    expect(LATEST_SCHEMA_VERSION).toBe(2);
+    expect(migrate(database)).toEqual([1, 2, 3]);
+    expect(LATEST_SCHEMA_VERSION).toBe(3);
   });
 
   it('is repeatable', () => {
@@ -34,7 +34,7 @@ describe('migrations', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all() as { version: number }[];
 
-    expect(rows.map((row) => row.version)).toEqual([1, 2]);
+    expect(rows.map((row) => row.version)).toEqual([1, 2, 3]);
   });
 
   it('seeds deterministic default gallery settings', () => {
@@ -54,6 +54,22 @@ describe('migrations', () => {
     expect(createSettingsRepository(database).read().slideDurationMs).toBe(
       12_000,
     );
+  });
+
+  it('rejects Telegram contributor rows with an unknown status', () => {
+    migrate(database);
+
+    expect(() =>
+      database
+        .prepare(
+          `INSERT INTO telegram_contributors (
+             telegram_user_id, status, first_name, last_name, username,
+             requested_at, updated_at
+           ) VALUES ('123', 'allowed', NULL, NULL, NULL,
+             '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+        )
+        .run(),
+    ).toThrow();
   });
 
   it('rejects media rows that violate the schema constraints', () => {

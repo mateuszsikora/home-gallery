@@ -20,6 +20,10 @@ import {
   createSettingsRepository,
   type SettingsRepository,
 } from './database/settings-repository.js';
+import {
+  createTelegramContributorRepository,
+  type TelegramContributorRepository,
+} from './database/telegram-contributor-repository.js';
 import { AdminSessionStore } from './http/admin-session-store.js';
 import { registerAdminSessionRoutes } from './http/admin-session-routes.js';
 import { registerAuthentication } from './http/authentication.js';
@@ -31,6 +35,7 @@ import { registerMediaUploadRoute } from './http/media-upload-route.js';
 import { registerPlaylistRoute } from './http/playlist-route.js';
 import { FixedWindowRateLimiter } from './http/rate-limit.js';
 import { registerSettingsRoutes } from './http/settings-routes.js';
+import { registerTelegramContributorRoutes } from './http/telegram-contributor-routes.js';
 import {
   createMediaStorage,
   type MediaStorage,
@@ -42,6 +47,7 @@ declare module 'fastify' {
     database: DatabaseConnection;
     mediaRepository: MediaRepository;
     settingsRepository: SettingsRepository;
+    telegramContributorRepository: TelegramContributorRepository;
     mediaStorage: MediaStorage;
   }
 }
@@ -107,6 +113,10 @@ export const createApp = async (
     app.decorate('database', database);
     app.decorate('mediaRepository', createMediaRepository(database));
     app.decorate('settingsRepository', createSettingsRepository(database));
+    app.decorate(
+      'telegramContributorRepository',
+      createTelegramContributorRepository(database),
+    );
     app.decorate('mediaStorage', storage);
 
     app.addHook('onSend', async (_request, reply, payload) => {
@@ -168,6 +178,7 @@ export const createApp = async (
     registerMediaContentRoute(app);
     registerPlaylistRoute(app);
     registerSettingsRoutes(app);
+    registerTelegramContributorRoutes(app);
 
     app.log.info(
       {

@@ -86,6 +86,15 @@ export const storeTestMedia = async (
   return { record, bytes };
 };
 
+/** Puts a Telegram contributor into the state that allows ingestion. */
+export const approveTestContributor = (
+  app: FastifyInstance,
+  telegramUserId: string,
+): void => {
+  app.telegramContributorRepository.register({ telegramUserId });
+  app.telegramContributorRepository.decide(telegramUserId, 'approved');
+};
+
 /** An in-memory database with the current schema, for repository tests. */
 export const createMigratedDatabase = (): DatabaseConnection => {
   const database = openDatabase(':memory:');

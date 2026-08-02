@@ -16,6 +16,9 @@ import type {
   GallerySettings,
   MediaRecord,
   PlaybackMode,
+  TelegramContributor,
+  TelegramContributorDecision,
+  TelegramContributorStatus,
 } from '@home-gallery/shared-types';
 
 export type AdminClient = Pick<
@@ -27,8 +30,10 @@ export type AdminClient = Pick<
   | 'getMediaContentUrl'
   | 'getSettings'
   | 'listMedia'
+  | 'listTelegramContributors'
   | 'updateMedia'
   | 'updateSettings'
+  | 'updateTelegramContributor'
   | 'uploadMedia'
 >;
 
@@ -85,6 +90,59 @@ const listAllMedia = async (client: AdminClient): Promise<MediaRecord[]> => {
   return sortMedia(items);
 };
 
+/** Mirrors the order the API uses, so a decision does not reshuffle the list. */
+const CONTRIBUTOR_RANK: Readonly<Record<TelegramContributorStatus, number>> = {
+  pending: 0,
+  approved: 1,
+  rejected: 2,
+};
+
+const sortContributors = (
+  items: readonly TelegramContributor[],
+): TelegramContributor[] =>
+  [...items].sort(
+    (left, right) =>
+      CONTRIBUTOR_RANK[left.status] - CONTRIBUTOR_RANK[right.status] ||
+      right.requestedAt.localeCompare(left.requestedAt) ||
+      left.telegramUserId.localeCompare(right.telegramUserId),
+  );
+
+const contributorName = (contributor: TelegramContributor): string => {
+  const displayName = [contributor.firstName, contributor.lastName]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join(' ')
+    .trim();
+
+  if (displayName) {
+    return displayName;
+  }
+
+  return contributor.username
+    ? `@${contributor.username}`
+    : `Telegram user ${contributor.telegramUserId}`;
+};
+
+interface StudioData {
+  readonly contributors: TelegramContributor[];
+  readonly media: MediaRecord[];
+  readonly settings: GallerySettings;
+}
+
+/** Everything the studio needs, fetched together so it opens in one state. */
+const loadStudio = async (client: AdminClient): Promise<StudioData> => {
+  const [media, settings, contributors] = await Promise.all([
+    listAllMedia(client),
+    client.getSettings(),
+    client.listTelegramContributors(),
+  ]);
+
+  return {
+    contributors: sortContributors(contributors.items),
+    media,
+    settings,
+  };
+};
+
 const errorDetail = (error: unknown): string => {
   if (error instanceof HomeGalleryApiError) {
     const issues = error.issues?.map(({ message }) => message).join(' ');
@@ -97,11 +155,19 @@ const errorDetail = (error: unknown): string => {
 const isUnauthorized = (error: unknown): boolean =>
   error instanceof HomeGalleryApiError && error.status === 401;
 
-const formatUploadedAt = (uploadedAt: string): string =>
+const formatTimestamp = (timestamp: string): string =>
   new Intl.DateTimeFormat('en', {
     dateStyle: 'medium',
     timeStyle: 'short',
-  }).format(new Date(uploadedAt));
+  }).format(new Date(timestamp));
+
+const CONTRIBUTOR_STATUS_LABEL: Readonly<
+  Record<TelegramContributorStatus, string>
+> = {
+  pending: 'Waiting for review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
 
 const mediaAttribution = (media: MediaRecord): string => {
   if (media.authorName !== undefined) {
@@ -159,6 +225,7 @@ export const AdminApp = ({
   const [tokenInput, setTokenInput] = useState('');
   const [phase, setPhase] = useState<Phase>('loading');
   const [media, setMedia] = useState<MediaRecord[]>([]);
+  const [contributors, setContributors] = useState<TelegramContributor[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>();
   const [busyAction, setBusyAction] = useState<string>();
   const [deleteCandidate, setDeleteCandidate] = useState<string>();
@@ -190,16 +257,15 @@ export const AdminApp = ({
 
     void client
       .getAdminSession()
-      .then(async () =>
-        Promise.all([listAllMedia(client), client.getSettings()]),
-      )
-      .then(([nextMedia, nextSettings]) => {
+      .then(async () => loadStudio(client))
+      .then((studio) => {
         if (cancelled) {
           return;
         }
 
-        setMedia(nextMedia);
-        setSettingsDraft(toSettingsDraft(nextSettings));
+        setMedia(studio.media);
+        setContributors(studio.contributors);
+        setSettingsDraft(toSettingsDraft(studio.settings));
         setPhase('ready');
         setTokenInput('');
       })
@@ -241,6 +307,7 @@ export const AdminApp = ({
   const signOut = (message?: string): void => {
     setTokenInput('');
     setMedia([]);
+    setContributors([]);
     setSettingsDraft(undefined);
     setBusyAction(undefined);
     setDeleteCandidate(undefined);
@@ -275,12 +342,10 @@ export const AdminApp = ({
 
     try {
       await client.createAdminSession(trimmedToken);
-      const [nextMedia, nextSettings] = await Promise.all([
-        listAllMedia(client),
-        client.getSettings(),
-      ]);
-      setMedia(nextMedia);
-      setSettingsDraft(toSettingsDraft(nextSettings));
+      const studio = await loadStudio(client);
+      setMedia(studio.media);
+      setContributors(studio.contributors);
+      setSettingsDraft(toSettingsDraft(studio.settings));
       setPhase('ready');
     } catch (reason) {
       setPhase('signed-out');
@@ -464,6 +529,43 @@ export const AdminApp = ({
     }
   };
 
+  const decideContributor = async (
+    contributor: TelegramContributor,
+    status: TelegramContributorDecision,
+  ): Promise<void> => {
+    if (busyAction !== undefined) {
+      return;
+    }
+
+    clearMessages();
+    setBusyAction(`contributor:${contributor.telegramUserId}`);
+
+    try {
+      const updated = await client.updateTelegramContributor(
+        contributor.telegramUserId,
+        { status },
+      );
+      setContributors((items) =>
+        sortContributors(
+          items.map((candidate) =>
+            candidate.telegramUserId === updated.telegramUserId
+              ? updated
+              : candidate,
+          ),
+        ),
+      );
+      setNotice(
+        `${contributorName(contributor)} can ${
+          status === 'approved' ? 'now' : 'no longer'
+        } send photos to the gallery.`,
+      );
+    } catch (reason) {
+      handleActionFailure(reason, 'The contributor decision was not saved.');
+    } finally {
+      setBusyAction(undefined);
+    }
+  };
+
   const saveSettings = async (
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
@@ -570,6 +672,9 @@ export const AdminApp = ({
   }
 
   const actionInProgress = busyAction !== undefined;
+  const pendingContributors = contributors.filter(
+    (contributor) => contributor.status === 'pending',
+  ).length;
 
   return (
     <div className="admin-shell">
@@ -716,7 +821,7 @@ export const AdminApp = ({
                           <dl className="metadata">
                             <div>
                               <dt>Added</dt>
-                              <dd>{formatUploadedAt(item.uploadedAt)}</dd>
+                              <dd>{formatTimestamp(item.uploadedAt)}</dd>
                             </div>
                             <div>
                               <dt>Frame</dt>
@@ -937,6 +1042,93 @@ export const AdminApp = ({
               </button>
             </form>
           </aside>
+
+          <section
+            aria-labelledby="contributors-title"
+            className="panel panel--contributors"
+          >
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">03 / Contributors</p>
+                <h2 id="contributors-title">Who may send photos</h2>
+              </div>
+              <span className="count-badge">{pendingContributors} waiting</span>
+            </div>
+
+            {contributors.length === 0 ? (
+              <div className="empty-state">
+                <span aria-hidden="true">□</span>
+                <h3>Nobody has asked yet.</h3>
+                <p>
+                  A Telegram user appears here the first time they write to the
+                  bot. Nothing they send is stored before you approve them.
+                </p>
+              </div>
+            ) : (
+              <ul className="contributor-list">
+                {contributors.map((contributor) => {
+                  const name = contributorName(contributor);
+                  const deciding =
+                    busyAction === `contributor:${contributor.telegramUserId}`;
+
+                  return (
+                    <li key={contributor.telegramUserId}>
+                      <article
+                        className={`contributor-card contributor-card--${contributor.status}`}
+                      >
+                        <div className="contributor-card__identity">
+                          <h3>{name}</h3>
+                          <p>
+                            {contributor.username === undefined
+                              ? null
+                              : `@${contributor.username} · `}
+                            Telegram ID {contributor.telegramUserId}
+                          </p>
+                          <p>
+                            Asked {formatTimestamp(contributor.requestedAt)}
+                          </p>
+                        </div>
+
+                        <div className="contributor-card__actions">
+                          <span
+                            className={`status-pill status-pill--${contributor.status}`}
+                          >
+                            {CONTRIBUTOR_STATUS_LABEL[contributor.status]}
+                          </span>
+                          {contributor.status === 'approved' ? null : (
+                            <button
+                              aria-label={`Approve ${name}`}
+                              className="button button--primary"
+                              disabled={actionInProgress}
+                              onClick={() =>
+                                void decideContributor(contributor, 'approved')
+                              }
+                              type="button"
+                            >
+                              {deciding ? 'Saving…' : 'Approve'}
+                            </button>
+                          )}
+                          {contributor.status === 'rejected' ? null : (
+                            <button
+                              aria-label={`Reject ${name}`}
+                              className="button button--danger-link"
+                              disabled={actionInProgress}
+                              onClick={() =>
+                                void decideContributor(contributor, 'rejected')
+                              }
+                              type="button"
+                            >
+                              Reject
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
         </div>
       </main>
 

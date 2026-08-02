@@ -15,6 +15,11 @@ import {
   mediaUploadMetadataSchema,
   playlistResponseSchema,
   supportedUploadMimeTypeSchema,
+  telegramContributorListResponseSchema,
+  telegramContributorRegistrationSchema,
+  telegramContributorSchema,
+  telegramContributorUpdateInputSchema,
+  telegramUserIdSchema,
   toPlaylistItem,
 } from '../src/index.js';
 
@@ -134,5 +139,61 @@ describe('administration session contract', () => {
       adminSessionSchema.safeParse({ expiresAt: 'tomorrow' }).success,
     ).toBe(false);
     expect(API_ROUTES.adminSession).toBe('/api/admin/session');
+  });
+});
+
+describe('telegram contributor contracts', () => {
+  const contributor = {
+    telegramUserId: '123456',
+    status: 'pending',
+    firstName: 'Ada',
+    lastName: 'Lovelace',
+    username: 'ada',
+    requestedAt: '2026-08-01T10:00:00.000Z',
+    updatedAt: '2026-08-01T10:00:00.000Z',
+  } as const;
+
+  it('parses an administrative contributor record', () => {
+    expect(telegramContributorSchema.parse(contributor)).toEqual(contributor);
+    expect(API_ROUTES.telegramContributors).toBe('/api/telegram/contributors');
+    expect(API_ROUTES.telegramContributorById('123456')).toBe(
+      '/api/telegram/contributors/123456',
+    );
+  });
+
+  it('accepts only positive Telegram user IDs', () => {
+    expect(telegramUserIdSchema.parse(' 123456 ')).toBe('123456');
+    for (const value of ['', '0', '-7', '12a', '1'.repeat(21)]) {
+      expect(telegramUserIdSchema.safeParse(value).success).toBe(false);
+    }
+  });
+
+  it('registers an identity without letting the bot set a status', () => {
+    expect(
+      telegramContributorRegistrationSchema.parse({ telegramUserId: '123456' }),
+    ).toEqual({ telegramUserId: '123456' });
+    expect(
+      telegramContributorRegistrationSchema.safeParse({
+        telegramUserId: '123456',
+        status: 'approved',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('limits an administrator to a decided status', () => {
+    expect(
+      telegramContributorUpdateInputSchema.parse({ status: 'approved' }),
+    ).toEqual({ status: 'approved' });
+    for (const status of ['pending', 'banned', undefined]) {
+      expect(
+        telegramContributorUpdateInputSchema.safeParse({ status }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('parses an unpaginated contributor list', () => {
+    const value = { items: [contributor] };
+
+    expect(telegramContributorListResponseSchema.parse(value)).toEqual(value);
   });
 });

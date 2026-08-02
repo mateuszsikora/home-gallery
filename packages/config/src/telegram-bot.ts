@@ -18,7 +18,6 @@ export interface TelegramBotConfig {
   botToken: string;
   apiUrl: string;
   ingestionToken: string;
-  allowedUserIds: ReadonlySet<number>;
   requestTimeoutMs: number;
   maxDownloadBytes: number;
 }
@@ -72,35 +71,6 @@ const apiUrlSchema = requiredString.transform((value, context) => {
   return url.toString().replace(/\/+$/u, '');
 });
 
-const allowedUserIdsSchema = requiredString.transform((value, context) => {
-  const entries = value.split(',').map((entry) => entry.trim());
-  const identifiers = new Set<number>();
-
-  for (const entry of entries) {
-    if (!/^\d+$/u.test(entry)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Must be a comma-separated list of positive Telegram user IDs',
-      });
-      return z.NEVER;
-    }
-
-    const identifier = Number(entry);
-
-    if (!Number.isSafeInteger(identifier) || identifier <= 0) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Every Telegram user ID must be a positive safe integer',
-      });
-      return z.NEVER;
-    }
-
-    identifiers.add(identifier);
-  }
-
-  return identifiers;
-});
-
 const requestTimeoutSchema = z
   .string()
   .trim()
@@ -124,7 +94,6 @@ const telegramBotEnvSchema = z.object({
   HOME_GALLERY_TELEGRAM_BOT_TOKEN: botTokenSchema,
   HOME_GALLERY_API_URL: apiUrlSchema,
   HOME_GALLERY_INGESTION_TOKEN: ingestionTokenSchema,
-  HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS: allowedUserIdsSchema,
   HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS: requestTimeoutSchema.optional(),
   HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES: maxDownloadBytesSchema.optional(),
 });
@@ -179,7 +148,6 @@ export const loadTelegramBotConfig = (
     botToken: parsed.data.HOME_GALLERY_TELEGRAM_BOT_TOKEN,
     apiUrl: parsed.data.HOME_GALLERY_API_URL,
     ingestionToken: parsed.data.HOME_GALLERY_INGESTION_TOKEN,
-    allowedUserIds: parsed.data.HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS,
     requestTimeoutMs:
       parsed.data.HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS ??
       DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS,

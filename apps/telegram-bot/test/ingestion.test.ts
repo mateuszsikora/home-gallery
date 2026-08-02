@@ -2,6 +2,8 @@ import type { UploadMediaInput } from '@home-gallery/api-client';
 import {
   SUPPORTED_UPLOAD_MIME_TYPES,
   type MediaRecord,
+  type TelegramContributor,
+  type TelegramContributorStatus,
 } from '@home-gallery/shared-types';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -28,6 +30,16 @@ const MEDIA_RECORD: MediaRecord = {
   height: 900,
 };
 
+const CONTRIBUTOR: TelegramContributor = {
+  telegramUserId: '123',
+  status: 'approved',
+  firstName: 'Ada',
+  lastName: 'Lovelace',
+  username: 'ada',
+  requestedAt: '2026-07-31T09:00:00.000Z',
+  updatedAt: '2026-07-31T09:30:00.000Z',
+};
+
 const PHOTO_MESSAGE: TelegramMediaMessage = {
   chatId: -100987,
   messageId: 42,
@@ -50,13 +62,17 @@ interface LogEntry {
   message: string;
 }
 
-const createHarness = () => {
+const createHarness = (status: TelegramContributorStatus = 'approved') => {
   const calls: string[] = [];
   const logs: LogEntry[] = [];
   const uploadMedia = vi.fn(async (_input: UploadMediaInput) => {
     void _input;
     calls.push('upload');
     return MEDIA_RECORD;
+  });
+  const registerTelegramContributor = vi.fn(async () => {
+    calls.push('register');
+    return { ...CONTRIBUTOR, status };
   });
   const getFileLink = vi.fn(async (fileId: string) => {
     calls.push(`lookup:${fileId}`);
@@ -80,8 +96,7 @@ const createHarness = () => {
   };
 
   const handler = createTelegramIngestionHandler({
-    allowedUserIds: new Set([123]),
-    homeGalleryClient: { uploadMedia },
+    homeGalleryClient: { registerTelegramContributor, uploadMedia },
     telegram,
     fetch: fetchMock as unknown as typeof globalThis.fetch,
     logger,
@@ -92,6 +107,7 @@ const createHarness = () => {
   return {
     calls,
     logs,
+    registerTelegramContributor,
     uploadMedia,
     getFileLink,
     deleteMessage,
@@ -104,20 +120,73 @@ const createHarness = () => {
 };
 
 describe('Telegram media ingestion', () => {
-  it('rejects unauthorized users without looking up, downloading, or uploading media', async () => {
-    const harness = createHarness();
+  it('records first contact as a pending request without looking up or downloading media', async () => {
+    const harness = createHarness('pending');
 
     const result = await harness.handler({
       ...PHOTO_MESSAGE,
-      from: { ...PHOTO_MESSAGE.from, id: 999 },
+      from: { id: 999, firstName: 'Grace', username: 'grace' },
     });
 
-    expect(result).toBe('rejected');
+    expect(result).toBe('pending');
+    expect(harness.registerTelegramContributor).toHaveBeenCalledExactlyOnceWith(
+      {
+        telegramUserId: '999',
+        firstName: 'Grace',
+        username: 'grace',
+      },
+    );
     expect(harness.getFileLink).not.toHaveBeenCalled();
     expect(harness.fetchMock).not.toHaveBeenCalled();
     expect(harness.uploadMedia).not.toHaveBeenCalled();
     expect(harness.deleteMessage).not.toHaveBeenCalled();
     expect(harness.reply).toHaveBeenCalledOnce();
+  });
+
+  it('keeps blocking a rejected contributor', async () => {
+    const harness = createHarness('rejected');
+
+    const result = await harness.handler(PHOTO_MESSAGE);
+
+    expect(result).toBe('rejected');
+    expect(harness.calls).toEqual(['register', 'reply']);
+    expect(harness.uploadMedia).not.toHaveBeenCalled();
+    expect(harness.deleteMessage).not.toHaveBeenCalled();
+  });
+
+  it('registers a contributor that sends no media at all', async () => {
+    const harness = createHarness('pending');
+
+    const result = await harness.handler({
+      chatId: PHOTO_MESSAGE.chatId,
+      messageId: PHOTO_MESSAGE.messageId,
+      from: PHOTO_MESSAGE.from,
+    });
+
+    expect(result).toBe('pending');
+    expect(harness.registerTelegramContributor).toHaveBeenCalledOnce();
+    expect(harness.reply).toHaveBeenCalledOnce();
+  });
+
+  it('retains the message when the contributor cannot be registered', async () => {
+    const harness = createHarness();
+    harness.registerTelegramContributor.mockRejectedValueOnce(
+      new Error('API unavailable'),
+    );
+
+    await expect(harness.handler(PHOTO_MESSAGE)).resolves.toBe('failed');
+
+    expect(harness.getFileLink).not.toHaveBeenCalled();
+    expect(harness.uploadMedia).not.toHaveBeenCalled();
+    expect(harness.deleteMessage).not.toHaveBeenCalled();
+    expect(harness.logs).toContainEqual(
+      expect.objectContaining({
+        level: 'error',
+        message:
+          'Could not register the Telegram contributor; the message was retained',
+        fields: expect.objectContaining({ errorMessage: 'API unavailable' }),
+      }),
+    );
   });
 
   it('selects the highest-quality photo, uploads attribution, then deletes exactly once', async () => {
@@ -138,6 +207,7 @@ describe('Telegram media ingestion', () => {
     expect(upload?.file.type).toBe('image/jpeg');
     expect(harness.deleteMessage).toHaveBeenCalledExactlyOnceWith(-100987, 42);
     expect(harness.calls).toEqual([
+      'register',
       'lookup:large',
       'download',
       'upload',
@@ -226,8 +296,10 @@ describe('Telegram media ingestion', () => {
       () => new Promise<MediaRecord>(() => undefined),
     );
     const handler = createTelegramIngestionHandler({
-      allowedUserIds: new Set([123]),
-      homeGalleryClient: { uploadMedia: harness.uploadMedia },
+      homeGalleryClient: {
+        registerTelegramContributor: harness.registerTelegramContributor,
+        uploadMedia: harness.uploadMedia,
+      },
       telegram: harness.telegram,
       fetch: harness.fetchMock as unknown as typeof globalThis.fetch,
       logger: harness.logger,
@@ -251,8 +323,10 @@ describe('Telegram media ingestion', () => {
       () => new Promise<URL>(() => undefined),
     );
     const handler = createTelegramIngestionHandler({
-      allowedUserIds: new Set([123]),
-      homeGalleryClient: { uploadMedia: harness.uploadMedia },
+      homeGalleryClient: {
+        registerTelegramContributor: harness.registerTelegramContributor,
+        uploadMedia: harness.uploadMedia,
+      },
       telegram: harness.telegram,
       fetch: harness.fetchMock as unknown as typeof globalThis.fetch,
       logger: harness.logger,
@@ -277,8 +351,10 @@ describe('Telegram media ingestion', () => {
       new Error(`Request ${botToken} failed with Bearer ${apiToken}`),
     );
     const handler = createTelegramIngestionHandler({
-      allowedUserIds: new Set([123]),
-      homeGalleryClient: { uploadMedia: harness.uploadMedia },
+      homeGalleryClient: {
+        registerTelegramContributor: harness.registerTelegramContributor,
+        uploadMedia: harness.uploadMedia,
+      },
       telegram: harness.telegram,
       fetch: harness.fetchMock as unknown as typeof globalThis.fetch,
       logger: harness.logger,

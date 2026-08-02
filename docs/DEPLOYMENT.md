@@ -29,7 +29,6 @@ Replace every placeholder in `.env`:
 
 - generate independent `HOME_GALLERY_ADMIN_TOKEN` and `HOME_GALLERY_INGESTION_TOKEN` values with `openssl rand -hex 32`;
 - set the token returned by BotFather as `HOME_GALLERY_TELEGRAM_BOT_TOKEN`;
-- set `HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS` to a comma-separated allowlist of numeric Telegram user IDs;
 - keep `HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES` at or below `HOME_GALLERY_MAX_UPLOAD_BYTES` so the bot rejects oversized responses before buffering them for upload;
 - keep the default host ports or choose unused alternatives;
 - use an absolute `HOME_GALLERY_BACKUP_DIR` on production hosts.
@@ -57,12 +56,12 @@ docker compose --env-file .env up -d --build --wait
 ## Telegram setup
 
 1. Use BotFather to create a bot and copy its token into `.env`.
-2. Obtain each contributor's numeric Telegram user ID through a trusted method.
-3. Put only those IDs in `HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS`.
-4. Deploy the stack and check `docker compose --project-name home-gallery logs telegram-bot` for `Telegram bot started`.
-5. Send a test image from an allowed account. Confirm that it appears in the administration application and that Telegram deletes the source message only after storage succeeds.
+2. Deploy the stack and check `docker compose --project-name home-gallery logs telegram-bot` for `Telegram bot started`.
+3. Ask each contributor to write to the bot once. The first message creates a pending access request and is answered with a note that the request is waiting.
+4. Open the administration application, review the request under **Contributors**, and approve or reject it. No deployment change or restart is involved.
+5. Send a test image from the approved account. Confirm that it appears in the administration application and that Telegram deletes the source message only after storage succeeds.
 
-Unauthorized messages are not downloaded. A failed upload stays in the chat and receives a failure reply.
+Media from a contributor who is pending or rejected is never looked up or downloaded, and the server refuses it even if a client asks. A failed upload stays in the chat and receives a failure reply. Rejecting an approved contributor takes effect on their next message; media they already contributed stays in the library until it is deleted.
 
 ## LAN access and first-run verification
 
@@ -275,8 +274,7 @@ Configure these repository or production-environment secrets:
 - `DEPLOY_SSH_KEY`;
 - `ADMIN_TOKEN`;
 - `INGESTION_TOKEN`;
-- `TELEGRAM_BOT_TOKEN`;
-- `TELEGRAM_ALLOWED_USER_IDS`.
+- `TELEGRAM_BOT_TOKEN`.
 
 Optional previous-token secrets `ADMIN_TOKEN_PREVIOUS` and `INGESTION_TOKEN_PREVIOUS` support the documented overlap window. Optional Actions variables configure ports, limits, proxy trust, administration uploads, and session lifetime/capacity using the matching `.env.example` names. The workflow writes `HOME_GALLERY_ADMIN_SESSION_SECURE=false` for the base profile, and the TLS Compose override forces it to `true` when TLS is enabled.
 
@@ -311,7 +309,8 @@ Routine checks should cover:
 - **The deploy script rejects `.env`:** run `chmod 600 .env`.
 - **The gallery or admin is unhealthy:** check the server health and the private `home-gallery` network first; both web health endpoints proxy the API.
 - **The server cannot write data:** inspect volume ownership and confirm the container still runs as UID/GID `1000`.
-- **The bot exits:** validate the BotFather token and comma-separated positive numeric allowlist, then inspect bot logs.
+- **The bot exits:** validate the BotFather token and the ingestion credential, then inspect bot logs.
+- **A contributor is stuck waiting:** confirm their request is listed under **Contributors** in the administration application and approve it there; the bot reports every contact it could not register.
 - **An image pull is denied:** refresh `docker login ghcr.io` with an account or token allowed to read the private packages.
 - **A deployment fails:** leave Tappa untouched, inspect `docker compose --project-name home-gallery ... ps --all`, correct the cause, and rerun `deploy.sh`.
 - **A restore fails health checks:** inspect server logs, keep the automatically generated pre-restore archive, and restore the last known-good archive.

@@ -57,7 +57,7 @@ Open the Vite URL shown in the terminal. The API URL defaults to the gallery pag
 
 ### Running the administration application
 
-The administration application uses the same API URL and asks for the administration bearer token once to create a short-lived server session. The token is never put in browser storage or a URL; subsequent requests use an opaque `HttpOnly`, `SameSite=Strict` cookie and an explicit anti-CSRF header for mutations. The in-memory session expires after eight hours by default, is invalidated by a server restart or the **Lock studio** action, and uses `Secure` automatically in the supported TLS profile. Administration uploads are disabled by default; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
+The administration application manages the media library, the playback settings, and the Telegram contributors who may submit photos. It uses the same API URL and asks for the administration bearer token once to create a short-lived server session. The token is never put in browser storage or a URL; subsequent requests use an opaque `HttpOnly`, `SameSite=Strict` cookie and an explicit anti-CSRF header for mutations. The in-memory session expires after eight hours by default, is invalidated by a server restart or the **Lock studio** action, and uses `Secure` automatically in the supported TLS profile. Administration uploads are disabled by default; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
 
 ```bash
 VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
@@ -68,18 +68,19 @@ When the API and administration application use different origins during local d
 
 ### Running the Telegram bot
 
-Create a bot with BotFather, obtain the numeric Telegram user IDs that may contribute, and configure the bot variables documented in `.env.example`. The bot uses the ingestion credential and cannot call administration routes.
+Create a bot with BotFather and configure the bot variables documented in `.env.example`. The bot uses the ingestion credential and cannot call administration routes.
 
 ```bash
 HOME_GALLERY_TELEGRAM_BOT_TOKEN="<bot-token>" \
-HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS="123456789,987654321" \
 HOME_GALLERY_API_URL=http://localhost:3012 \
 HOME_GALLERY_INGESTION_TOKEN="<server-ingestion-token>" \
 HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES=26214400 \
 npm run start --workspace @home-gallery/telegram-bot
 ```
 
-Allowed users can send Telegram photo messages or JPEG, PNG, WebP, HEIC, and HEIF image documents. The bot chooses the largest available Telegram photo, enforces its download limit while streaming the response, uploads it with contributor attribution, and deletes the source message only after Home Gallery confirms storage. Keep the bot download limit at or below the server upload limit. Unsupported, oversized, or unauthorized submissions are not uploaded. Failed uploads remain in the chat and receive a status reply so they can be retried.
+Contributors are approved in the administration application rather than configured at deployment time. The first message from an unknown Telegram user creates a pending access request and is answered with a status reply; the bot does not look up or download anything until an administrator approves the request, and the server refuses Telegram uploads from anybody else.
+
+Approved users can send Telegram photo messages or JPEG, PNG, WebP, HEIC, and HEIF image documents. The bot chooses the largest available Telegram photo, enforces its download limit while streaming the response, uploads it with contributor attribution, and deletes the source message only after Home Gallery confirms storage. Keep the bot download limit at or below the server upload limit. Unsupported, oversized, or unapproved submissions are not uploaded. Failed uploads remain in the chat and receive a status reply so they can be retried.
 
 ## Agent-driven development
 
