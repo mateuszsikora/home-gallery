@@ -104,6 +104,36 @@ describe('server application', () => {
     }
   });
 
+  describe('trusted proxy handling', () => {
+    const readClientIp = async (trustedProxies: readonly string[]) => {
+      const app = await createApp(
+        createTestConfig(dataDirectory, { trustedProxies }),
+      );
+      app.get('/test/client-ip', async (request) => ({ ip: request.ip }));
+
+      try {
+        return await app.inject({
+          method: 'GET',
+          url: '/test/client-ip',
+          remoteAddress: '203.0.113.10',
+          headers: { 'x-forwarded-for': '198.51.100.20' },
+        });
+      } finally {
+        await app.close();
+      }
+    };
+
+    it('ignores forwarded client addresses by default', async () => {
+      expect((await readClientIp([])).json()).toEqual({ ip: '203.0.113.10' });
+    });
+
+    it('uses a forwarded client address only behind an explicit trusted proxy', async () => {
+      expect((await readClientIp(['203.0.113.10'])).json()).toEqual({
+        ip: '198.51.100.20',
+      });
+    });
+  });
+
   describe('CORS policy', () => {
     const requestWithOrigin = async (
       allowedOrigins: readonly string[],

@@ -13,7 +13,7 @@ import { ApiError } from './errors.js';
  * playlist response instead of from these routes.
  */
 export const registerSettingsRoutes = (app: FastifyInstance): void => {
-  const protectedRoute = { onRequest: app.requireBearerToken };
+  const protectedRoute = { onRequest: app.requireAdministrationToken };
 
   app.get(API_ROUTES.settings, protectedRoute, async (request, reply) =>
     reply

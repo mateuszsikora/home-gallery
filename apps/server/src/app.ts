@@ -26,6 +26,7 @@ import { registerMediaContentRoute } from './http/media-content-route.js';
 import { registerMediaRoutes } from './http/media-routes.js';
 import { registerMediaUploadRoute } from './http/media-upload-route.js';
 import { registerPlaylistRoute } from './http/playlist-route.js';
+import { FixedWindowRateLimiter } from './http/rate-limit.js';
 import { registerSettingsRoutes } from './http/settings-routes.js';
 import {
   createMediaStorage,
@@ -80,6 +81,8 @@ export const createApp = async (
     const appliedMigrations = migrate(database);
 
     const app = Fastify({
+      trustProxy:
+        config.trustedProxies.length > 0 ? [...config.trustedProxies] : false,
       logger: {
         level: config.logLevel,
         redact: {
@@ -109,7 +112,14 @@ export const createApp = async (
     });
 
     registerErrorHandling(app);
-    registerAuthentication(app, config.apiToken);
+    registerAuthentication(app, {
+      administrationTokens: config.administrationTokens,
+      ingestionTokens: config.ingestionTokens,
+      allowAdministrationUploads: config.allowAdministrationUploads,
+      failureLimiter: new FixedWindowRateLimiter(
+        config.authenticationRateLimit,
+      ),
+    });
 
     await app.register(multipart, {
       limits: {
@@ -150,6 +160,10 @@ export const createApp = async (
         maxUploadBytes: config.maxUploadBytes,
         maxStoredFiles: config.maxStoredFiles,
         allowedOrigins: config.allowedOrigins,
+        trustedProxies: config.trustedProxies,
+        authenticationRateLimit: config.authenticationRateLimit,
+        uploadRateLimit: config.uploadRateLimit,
+        allowAdministrationUploads: config.allowAdministrationUploads,
       },
       'Home Gallery server initialized',
     );

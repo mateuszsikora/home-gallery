@@ -17,7 +17,7 @@ export const DEFAULT_TELEGRAM_MAX_DOWNLOAD_BYTES = DEFAULT_MAX_UPLOAD_BYTES;
 export interface TelegramBotConfig {
   botToken: string;
   apiUrl: string;
-  apiToken: string;
+  ingestionToken: string;
   allowedUserIds: ReadonlySet<number>;
   requestTimeoutMs: number;
   maxDownloadBytes: number;
@@ -29,7 +29,7 @@ const botTokenSchema = requiredString
   .regex(/^\d{1,20}:[A-Za-z0-9_-]{20,}$/u, 'Must be a valid Telegram bot token')
   .max(256, 'Must be at most 256 characters');
 
-const apiTokenSchema = requiredString
+const ingestionTokenSchema = requiredString
   .min(
     MIN_API_TOKEN_LENGTH,
     `Must be at least ${MIN_API_TOKEN_LENGTH} characters`,
@@ -123,7 +123,7 @@ const maxDownloadBytesSchema = z
 const telegramBotEnvSchema = z.object({
   HOME_GALLERY_TELEGRAM_BOT_TOKEN: botTokenSchema,
   HOME_GALLERY_API_URL: apiUrlSchema,
-  HOME_GALLERY_API_TOKEN: apiTokenSchema,
+  HOME_GALLERY_INGESTION_TOKEN: ingestionTokenSchema,
   HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS: allowedUserIdsSchema,
   HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS: requestTimeoutSchema.optional(),
   HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES: maxDownloadBytesSchema.optional(),
@@ -178,7 +178,7 @@ export const loadTelegramBotConfig = (
   return {
     botToken: parsed.data.HOME_GALLERY_TELEGRAM_BOT_TOKEN,
     apiUrl: parsed.data.HOME_GALLERY_API_URL,
-    apiToken: parsed.data.HOME_GALLERY_API_TOKEN,
+    ingestionToken: parsed.data.HOME_GALLERY_INGESTION_TOKEN,
     allowedUserIds: parsed.data.HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS,
     requestTimeoutMs:
       parsed.data.HOME_GALLERY_TELEGRAM_REQUEST_TIMEOUT_MS ??

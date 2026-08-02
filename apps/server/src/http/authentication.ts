@@ -3,6 +3,8 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, onRequestHookHandler } from 'fastify';
 
 import { ApiError } from './errors.js';
+import { rejectWhenRateLimited } from './rate-limit.js';
+import type { FixedWindowRateLimiter } from './rate-limit.js';
 
 const BEARER_SCHEME = 'bearer';
 
@@ -39,25 +41,73 @@ const readBearerToken = (header: string | undefined): string | undefined => {
 
 declare module 'fastify' {
   interface FastifyInstance {
-    /** `onRequest` hook that rejects anything without the configured token. */
-    requireBearerToken: onRequestHookHandler;
+    requireAdministrationToken: onRequestHookHandler;
+    requireIngestionToken: onRequestHookHandler;
   }
 }
 
 export const registerAuthentication = (
   app: FastifyInstance,
-  apiToken: string,
+  options: {
+    administrationTokens: readonly string[];
+    ingestionTokens: readonly string[];
+    allowAdministrationUploads: boolean;
+    failureLimiter: FixedWindowRateLimiter;
+  },
 ): void => {
-  const requireBearerToken: onRequestHookHandler = (request, reply, done) => {
-    const token = readBearerToken(request.headers.authorization);
+  const createGuard =
+    (
+      scope: 'administration' | 'ingestion',
+      expectedTokens: readonly string[],
+    ): onRequestHookHandler =>
+    (request, reply, done) => {
+      const token = readBearerToken(request.headers.authorization);
 
-    if (token === undefined || !secretsMatch(token, apiToken)) {
-      done(new ApiError('unauthorized', 'A valid bearer token is required'));
-      return;
-    }
+      if (
+        token !== undefined &&
+        expectedTokens.some((expected) => secretsMatch(token, expected))
+      ) {
+        done();
+        return;
+      }
 
-    done();
-  };
+      try {
+        const result = options.failureLimiter.consume(request.ip);
 
-  app.decorate('requireBearerToken', requireBearerToken);
+        if (!result.allowed && result.firstRejection) {
+          request.log.warn(
+            {
+              clientAddress: request.ip,
+              limit: options.failureLimiter.config.max,
+              scope,
+              windowMs: options.failureLimiter.config.windowMs,
+            },
+            'Authentication failure limit reached',
+          );
+        }
+
+        rejectWhenRateLimited(
+          result,
+          reply,
+          'Too many invalid authentication attempts',
+        );
+        done(new ApiError('unauthorized', 'A valid bearer token is required'));
+      } catch (error) {
+        done(error as Error);
+      }
+    };
+
+  app.decorate(
+    'requireAdministrationToken',
+    createGuard('administration', options.administrationTokens),
+  );
+  app.decorate(
+    'requireIngestionToken',
+    createGuard('ingestion', [
+      ...options.ingestionTokens,
+      ...(options.allowAdministrationUploads
+        ? options.administrationTokens
+        : []),
+    ]),
+  );
 };

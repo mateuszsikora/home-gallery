@@ -19,6 +19,10 @@ import {
 } from '../media/image-normalizer.js';
 import type { TemporaryMediaFile } from '../storage/media-storage.js';
 import { ApiError } from './errors.js';
+import {
+  createRequestRateLimitHook,
+  FixedWindowRateLimiter,
+} from './rate-limit.js';
 
 const FILE_FIELD_NAME = 'file';
 
@@ -143,10 +147,16 @@ const toImageApiError = (error: unknown): ApiError => {
 
 export const registerMediaUploadRoute = (app: FastifyInstance): void => {
   let reservedUploads = 0;
+  const enforceUploadRateLimit = createRequestRateLimitHook(
+    new FixedWindowRateLimiter(app.config.uploadRateLimit),
+    'Too many media upload attempts',
+  );
 
   app.post(
     API_ROUTES.media,
-    { onRequest: app.requireBearerToken },
+    {
+      onRequest: [app.requireIngestionToken, enforceUploadRateLimit],
+    },
     async (request, reply) => {
       if (
         app.mediaRepository.count() + reservedUploads >=

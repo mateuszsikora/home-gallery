@@ -43,20 +43,20 @@ An issue may adjust a library choice when implementation evidence justifies it, 
 
 The planned MVP API is:
 
-| Method   | Path              | Access       | Purpose                                     |
-| -------- | ----------------- | ------------ | ------------------------------------------- |
-| `GET`    | `/health`         | Public       | Liveness and readiness signal               |
-| `POST`   | `/api/media`      | Bearer token | Validate, normalize, and store an image     |
-| `GET`    | `/api/media`      | Bearer token | List all media for administration           |
-| `GET`    | `/api/media/{id}` | Bearer token | Return media metadata                       |
-| `PATCH`  | `/api/media/{id}` | Bearer token | Enable, disable, or reorder media           |
-| `DELETE` | `/api/media/{id}` | Bearer token | Delete metadata and its local file          |
-| `GET`    | `/api/playlist`   | Public       | Return enabled media and slideshow settings |
-| `GET`    | `/media/{id}`     | Public       | Stream an enabled normalized image          |
-| `GET`    | `/api/settings`   | Bearer token | Read gallery settings                       |
-| `PATCH`  | `/api/settings`   | Bearer token | Update gallery settings                     |
+| Method   | Path              | Access               | Purpose                                     |
+| -------- | ----------------- | -------------------- | ------------------------------------------- |
+| `GET`    | `/health`         | Public               | Liveness and readiness signal               |
+| `POST`   | `/api/media`      | Ingestion token      | Validate, normalize, and store an image     |
+| `GET`    | `/api/media`      | Administration token | List all media for administration           |
+| `GET`    | `/api/media/{id}` | Administration token | Return media metadata                       |
+| `PATCH`  | `/api/media/{id}` | Administration token | Enable, disable, or reorder media           |
+| `DELETE` | `/api/media/{id}` | Administration token | Delete metadata and its local file          |
+| `GET`    | `/api/playlist`   | Public               | Return enabled media and slideshow settings |
+| `GET`    | `/media/{id}`     | Public               | Stream an enabled normalized image          |
+| `GET`    | `/api/settings`   | Administration token | Read gallery settings                       |
+| `PATCH`  | `/api/settings`   | Administration token | Update gallery settings                     |
 
-The bearer token protects both bot uploads and administrative operations for the MVP. A future issue may separate upload and administration credentials.
+The MVP initially used one bearer token. Post-MVP issue #21 separates bot ingestion and administrative operations into independently rotatable credentials while preserving these route boundaries.
 
 ## 4. Data model
 

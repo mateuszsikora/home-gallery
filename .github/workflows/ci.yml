@@ -56,6 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Validate the optional TLS deployment profile
+        run: bash scripts/tls-config-smoke.sh
+
       - name: Validate and exercise the Compose stack
         run: bash scripts/compose-smoke.sh
 
@@ -189,6 +192,8 @@ jobs:
             -e "ssh -i ~/.ssh/home_gallery_ed25519 -o StrictHostKeyChecking=accept-new" \
             --rsync-path="mkdir -p '$DEPLOY_DIR' && rsync" \
             docker-compose.yml \
+            docker-compose.tls.yml \
+            docker \
             .env.example \
             infra/deploy.sh \
             infra/backup.sh \
@@ -198,18 +203,34 @@ jobs:
 
       - name: Install runtime configuration
         env:
-          API_TOKEN: ${{ secrets.HOME_GALLERY_API_TOKEN }}
+          ADMIN_TOKEN: ${{ secrets.HOME_GALLERY_ADMIN_TOKEN }}
+          ADMIN_TOKEN_PREVIOUS: ${{ secrets.HOME_GALLERY_ADMIN_TOKEN_PREVIOUS }}
+          INGESTION_TOKEN: ${{ secrets.HOME_GALLERY_INGESTION_TOKEN }}
+          INGESTION_TOKEN_PREVIOUS: ${{ secrets.HOME_GALLERY_INGESTION_TOKEN_PREVIOUS }}
           BOT_TOKEN: ${{ secrets.HOME_GALLERY_TELEGRAM_BOT_TOKEN }}
           ALLOWED_USER_IDS: ${{ secrets.HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS }}
           GALLERY_PORT: ${{ vars.HOME_GALLERY_GALLERY_PORT || '3010' }}
           ADMIN_PORT: ${{ vars.HOME_GALLERY_ADMIN_PORT || '3011' }}
           API_PORT: ${{ vars.HOME_GALLERY_API_PORT || '3012' }}
+          HTTP_BIND_ADDRESS: ${{ vars.HOME_GALLERY_HTTP_BIND_ADDRESS || '0.0.0.0' }}
+          TLS_ENABLED: ${{ vars.HOME_GALLERY_TLS_ENABLED || 'false' }}
+          TLS_GALLERY_HOST: ${{ vars.HOME_GALLERY_TLS_GALLERY_HOST }}
+          TLS_ADMIN_HOST: ${{ vars.HOME_GALLERY_TLS_ADMIN_HOST }}
+          TLS_HTTP_PORT: ${{ vars.HOME_GALLERY_TLS_HTTP_PORT || '80' }}
+          TLS_HTTPS_PORT: ${{ vars.HOME_GALLERY_TLS_HTTPS_PORT || '443' }}
+          ALLOW_ADMIN_UPLOADS: ${{ vars.HOME_GALLERY_ALLOW_ADMIN_UPLOADS || 'false' }}
+          AUTH_RATE_LIMIT_MAX: ${{ vars.HOME_GALLERY_AUTH_RATE_LIMIT_MAX || '10' }}
+          AUTH_RATE_LIMIT_WINDOW_MS: ${{ vars.HOME_GALLERY_AUTH_RATE_LIMIT_WINDOW_MS || '60000' }}
+          UPLOAD_RATE_LIMIT_MAX: ${{ vars.HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX || '30' }}
+          UPLOAD_RATE_LIMIT_WINDOW_MS: ${{ vars.HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS || '60000' }}
+          TRUSTED_PROXIES: ${{ vars.HOME_GALLERY_TRUSTED_PROXIES }}
           DEPLOY_DIR: ${{ steps.remote.outputs.directory }}
           DEPLOY_HOST: ${{ secrets.HOME_GALLERY_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.HOME_GALLERY_DEPLOY_USER }}
         run: |
           set -euo pipefail
-          test -n "$API_TOKEN"
+          test -n "$ADMIN_TOKEN"
+          test -n "$INGESTION_TOKEN"
           test -n "$BOT_TOKEN"
           test -n "$ALLOWED_USER_IDS"
           ENV_PATH=$(mktemp)
@@ -219,8 +240,23 @@ jobs:
             printf 'HOME_GALLERY_GALLERY_PORT=%s\n' "$GALLERY_PORT"
             printf 'HOME_GALLERY_ADMIN_PORT=%s\n' "$ADMIN_PORT"
             printf 'HOME_GALLERY_API_PORT=%s\n' "$API_PORT"
+            printf 'HOME_GALLERY_HTTP_BIND_ADDRESS=%s\n' "$HTTP_BIND_ADDRESS"
             printf 'HOME_GALLERY_BACKUP_DIR=%s/backups\n' "$DEPLOY_DIR"
-            printf 'HOME_GALLERY_API_TOKEN=%s\n' "$API_TOKEN"
+            printf 'HOME_GALLERY_TLS_ENABLED=%s\n' "$TLS_ENABLED"
+            printf 'HOME_GALLERY_TLS_GALLERY_HOST=%s\n' "$TLS_GALLERY_HOST"
+            printf 'HOME_GALLERY_TLS_ADMIN_HOST=%s\n' "$TLS_ADMIN_HOST"
+            printf 'HOME_GALLERY_TLS_HTTP_PORT=%s\n' "$TLS_HTTP_PORT"
+            printf 'HOME_GALLERY_TLS_HTTPS_PORT=%s\n' "$TLS_HTTPS_PORT"
+            printf 'HOME_GALLERY_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
+            printf 'HOME_GALLERY_ADMIN_TOKEN_PREVIOUS=%s\n' "$ADMIN_TOKEN_PREVIOUS"
+            printf 'HOME_GALLERY_INGESTION_TOKEN=%s\n' "$INGESTION_TOKEN"
+            printf 'HOME_GALLERY_INGESTION_TOKEN_PREVIOUS=%s\n' "$INGESTION_TOKEN_PREVIOUS"
+            printf 'HOME_GALLERY_ALLOW_ADMIN_UPLOADS=%s\n' "$ALLOW_ADMIN_UPLOADS"
+            printf 'HOME_GALLERY_AUTH_RATE_LIMIT_MAX=%s\n' "$AUTH_RATE_LIMIT_MAX"
+            printf 'HOME_GALLERY_AUTH_RATE_LIMIT_WINDOW_MS=%s\n' "$AUTH_RATE_LIMIT_WINDOW_MS"
+            printf 'HOME_GALLERY_UPLOAD_RATE_LIMIT_MAX=%s\n' "$UPLOAD_RATE_LIMIT_MAX"
+            printf 'HOME_GALLERY_UPLOAD_RATE_LIMIT_WINDOW_MS=%s\n' "$UPLOAD_RATE_LIMIT_WINDOW_MS"
+            printf 'HOME_GALLERY_TRUSTED_PROXIES=%s\n' "$TRUSTED_PROXIES"
             printf 'HOME_GALLERY_MAX_UPLOAD_BYTES=26214400\n'
             printf 'HOME_GALLERY_MAX_STORED_FILES=5000\n'
             printf 'HOME_GALLERY_ALLOWED_ORIGINS=\n'

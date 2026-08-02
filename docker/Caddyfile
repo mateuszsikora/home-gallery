@@ -1,0 +1,13 @@
+{
+	admin off
+}
+
+{$HOME_GALLERY_TLS_GALLERY_HOST} {
+	encode zstd gzip
+	reverse_proxy gallery:8080
+}
+
+{$HOME_GALLERY_TLS_ADMIN_HOST} {
+	encode zstd gzip
+	reverse_proxy admin:8080
+}

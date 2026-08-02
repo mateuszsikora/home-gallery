@@ -5,9 +5,11 @@ set -Eeuo pipefail
 REPOSITORY_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 TEMP_DIR=$(mktemp -d)
 PROJECT_NAME="home-gallery-smoke-$RANDOM"
-API_TOKEN=compose-smoke-api-token-0123456789abcdef
+ADMIN_TOKEN=compose-smoke-admin-token-0123456789abcdef
+INGESTION_TOKEN=compose-smoke-ingestion-token-0123456789abcd
 
-export HOME_GALLERY_API_TOKEN=$API_TOKEN
+export HOME_GALLERY_ADMIN_TOKEN=$ADMIN_TOKEN
+export HOME_GALLERY_INGESTION_TOKEN=$INGESTION_TOKEN
 export HOME_GALLERY_TELEGRAM_BOT_TOKEN=123456789:compose_smoke_token_1234567890
 export HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS=123456789
 export HOME_GALLERY_GALLERY_PORT=${HOME_GALLERY_SMOKE_GALLERY_PORT:-33110}
@@ -73,8 +75,19 @@ curl --fail --silent --show-error "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/" |
 printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' |
   openssl base64 -d -A >"$TEMP_DIR/smoke.png"
 
+ADMIN_UPLOAD_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --header "Authorization: Bearer $ADMIN_TOKEN" \
+  --form "file=@$TEMP_DIR/smoke.png;type=image/png" \
+  --form 'originalFilename=smoke.png' \
+  --form 'source=admin' \
+  "http://127.0.0.1:$HOME_GALLERY_API_PORT/api/media")
+if [[ "$ADMIN_UPLOAD_STATUS" != "401" ]]; then
+  echo "ERROR: Administration credential received $ADMIN_UPLOAD_STATUS from the ingestion-only route." >&2
+  exit 1
+fi
+
 UPLOAD_RESPONSE=$(curl --fail --silent --show-error \
-  --header "Authorization: Bearer $API_TOKEN" \
+  --header "Authorization: Bearer $INGESTION_TOKEN" \
   --form "file=@$TEMP_DIR/smoke.png;type=image/png" \
   --form 'originalFilename=smoke.png' \
   --form 'source=api' \
@@ -90,10 +103,17 @@ curl --fail --silent --show-error \
   "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/api/playlist" |
   grep -q "$MEDIA_ID"
 ADMIN_MEDIA_RESPONSE=$(curl --fail --silent --show-error \
-  --header "Authorization: Bearer $API_TOKEN" \
+  --header "Authorization: Bearer $ADMIN_TOKEN" \
   "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media")
 if ! grep -q "$MEDIA_ID" <<<"$ADMIN_MEDIA_RESPONSE"; then
   echo "ERROR: Uploaded media was not visible through the admin API proxy." >&2
+  exit 1
+fi
+INGESTION_ADMIN_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --header "Authorization: Bearer $INGESTION_TOKEN" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media")
+if [[ "$INGESTION_ADMIN_STATUS" != "401" ]]; then
+  echo "ERROR: Ingestion credential received $INGESTION_ADMIN_STATUS from an administration route." >&2
   exit 1
 fi
 UNAUTHORIZED_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -104,7 +124,7 @@ if [[ "$UNAUTHORIZED_STATUS" != "401" ]]; then
 fi
 curl --fail --silent --show-error \
   --request PATCH \
-  --header "Authorization: Bearer $API_TOKEN" \
+  --header "Authorization: Bearer $ADMIN_TOKEN" \
   --header 'Content-Type: application/json' \
   --data '{"slideDurationMs":2500}' \
   "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/settings" |
@@ -142,7 +162,7 @@ BACKUP_PATH=$(find "$HOME_GALLERY_BACKUP_DIR" -maxdepth 1 \
 
 curl --fail --silent --show-error \
   --request DELETE \
-  --header "Authorization: Bearer $API_TOKEN" \
+  --header "Authorization: Bearer $ADMIN_TOKEN" \
   "http://127.0.0.1:$HOME_GALLERY_API_PORT/api/media/$MEDIA_ID"
 
 "$REPOSITORY_ROOT/infra/restore.sh" "$BACKUP_PATH"
@@ -153,7 +173,7 @@ curl --fail --silent --show-error \
   --output /dev/null \
   "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/media/$MEDIA_ID"
 curl --fail --silent --show-error \
-  --header "Authorization: Bearer $API_TOKEN" \
+  --header "Authorization: Bearer $ADMIN_TOKEN" \
   "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media" |
   grep -q "$MEDIA_ID"
 

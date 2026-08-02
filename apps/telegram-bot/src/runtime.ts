@@ -39,12 +39,12 @@ export const createTelegramBot = (
     // it never abandons a handler that is still completing its cleanup path.
     handlerTimeout: config.requestTimeoutMs * 6 + 1_000,
   });
-  const secrets = [config.botToken, config.apiToken];
+  const secrets = [config.botToken, config.ingestionToken];
   const ingestionHandler = createTelegramIngestionHandler({
     allowedUserIds: config.allowedUserIds,
     homeGalleryClient: createHomeGalleryClient({
       baseUrl: config.apiUrl,
-      token: config.apiToken,
+      token: config.ingestionToken,
       fetch: timeoutFetch(config.requestTimeoutMs),
     }),
     telegram: {

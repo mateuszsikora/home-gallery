@@ -16,13 +16,22 @@ fi
 
 DEPLOY_DIR=${HOME_GALLERY_DEPLOY_DIR:-$DEFAULT_DEPLOY_DIR}
 COMPOSE_FILE=${HOME_GALLERY_COMPOSE_FILE:-$DEPLOY_DIR/docker-compose.yml}
+TLS_COMPOSE_FILE=${HOME_GALLERY_TLS_COMPOSE_FILE:-$DEPLOY_DIR/docker-compose.tls.yml}
 ENV_FILE=${HOME_GALLERY_ENV_FILE:-$DEPLOY_DIR/.env}
 COMPOSE_PROJECT=${HOME_GALLERY_COMPOSE_PROJECT:-home-gallery}
 CONFIGURED_BACKUP_DIR=
+TLS_ENABLED=
 if [[ -f "$ENV_FILE" ]]; then
   CONFIGURED_BACKUP_DIR=$(awk -F= \
     '$1 == "HOME_GALLERY_BACKUP_DIR" { print substr($0, index($0, "=") + 1) }' \
     "$ENV_FILE" | tail -n 1)
+  TLS_ENABLED=$(awk -F= \
+    '$1 == "HOME_GALLERY_TLS_ENABLED" { print substr($0, index($0, "=") + 1) }' \
+    "$ENV_FILE" | tail -n 1)
+fi
+COMPOSE_FILES=(--file "$COMPOSE_FILE")
+if [[ "$TLS_ENABLED" == "true" ]]; then
+  COMPOSE_FILES+=(--file "$TLS_COMPOSE_FILE")
 fi
 BACKUP_DIR=${HOME_GALLERY_BACKUP_DIR:-${CONFIGURED_BACKUP_DIR:-$DEPLOY_DIR/backups}}
 if [[ "$BACKUP_DIR" != /* ]]; then
@@ -75,7 +84,7 @@ dc() {
   docker compose \
     --project-name "$COMPOSE_PROJECT" \
     --env-file "$ENV_FILE" \
-    --file "$COMPOSE_FILE" \
+    "${COMPOSE_FILES[@]}" \
     "$@"
 }
 

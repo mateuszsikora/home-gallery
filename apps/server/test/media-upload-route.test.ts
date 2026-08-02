@@ -16,7 +16,7 @@ import {
   createTemporaryDataDirectory,
   createTestConfig,
   removeTemporaryDataDirectory,
-  TEST_API_TOKEN,
+  TEST_INGESTION_TOKEN,
 } from './helpers.js';
 
 interface MultipartField {
@@ -123,7 +123,7 @@ describe('POST /api/media', () => {
   const upload = async (
     fields: readonly MultipartField[],
     file?: MultipartFile,
-    token: string | null = TEST_API_TOKEN,
+    token: string | null = TEST_INGESTION_TOKEN,
   ) => {
     const { boundary, payload } = multipartBody(fields, file);
 
@@ -206,6 +206,29 @@ describe('POST /api/media', () => {
       'unauthorized',
     );
     await expectEmptyStorage();
+  });
+
+  it('bounds authenticated upload attempts without limiting playlist reads', async () => {
+    await app.close();
+    app = await createApp(
+      createTestConfig(dataDirectory, {
+        uploadRateLimit: { max: 2, windowMs: 60_000 },
+      }),
+    );
+
+    expect((await upload(validFields())).statusCode).toBe(422);
+    expect((await upload(validFields())).statusCode).toBe(422);
+
+    const limited = await upload(validFields());
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBe('60');
+    expect(apiErrorBodySchema.parse(limited.json()).error.code).toBe(
+      'rate_limited',
+    );
+    expect(
+      (await app.inject({ method: 'GET', url: API_ROUTES.playlist }))
+        .statusCode,
+    ).toBe(200);
   });
 
   it('rejects missing or invalid upload metadata and removes temporary files', async () => {

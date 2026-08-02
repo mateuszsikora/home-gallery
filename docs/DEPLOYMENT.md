@@ -1,6 +1,6 @@
 # Production Deployment
 
-Home Gallery ships as four `linux/amd64` images and one isolated Docker Compose project. The default LAN ports are `3010` for the gallery, `3011` for the administration application, and `3012` for the API. The web containers proxy API and media requests over the private Compose network, so browser tokens stay same-origin and no production CORS allowlist is required.
+Home Gallery ships as four `linux/amd64` application images and one isolated Docker Compose project. The default trusted-LAN profile exposes ports `3010` for the gallery, `3011` for the administration application, and `3012` for the API. An optional TLS profile adds Caddy 2.11.4, exposes only ports 80 and 443 beyond the host, and binds the three plain-HTTP ports to loopback. The web containers proxy API and media requests over the private Compose network, so browser tokens stay same-origin and no production CORS allowlist is required.
 
 ## Prerequisites
 
@@ -27,14 +27,14 @@ chmod 600 .env
 
 Replace every placeholder in `.env`:
 
-- generate `HOME_GALLERY_API_TOKEN` with `openssl rand -hex 32`;
+- generate independent `HOME_GALLERY_ADMIN_TOKEN` and `HOME_GALLERY_INGESTION_TOKEN` values with `openssl rand -hex 32`;
 - set the token returned by BotFather as `HOME_GALLERY_TELEGRAM_BOT_TOKEN`;
 - set `HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS` to a comma-separated allowlist of numeric Telegram user IDs;
 - keep `HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES` at or below `HOME_GALLERY_MAX_UPLOAD_BYTES` so the bot rejects oversized responses before buffering them for upload;
 - keep the default host ports or choose unused alternatives;
 - use an absolute `HOME_GALLERY_BACKUP_DIR` on production hosts.
 
-The API token is also the administration login token and the bot-to-server credential. It must be at least 32 characters with no whitespace. Keep `.env`, backups, databases, and uploaded media out of source control.
+Each application credential must be at least 32 characters with no whitespace. The administration token manages media and settings. The ingestion token can only upload media and is used by the Telegram bot. Keep `.env`, backups, databases, uploaded media, and Caddy certificate storage out of source control.
 
 Log in to the private GitHub Container Registry package, then deploy:
 
@@ -72,7 +72,7 @@ With the default ports, open:
 - `http://192.168.21.250:3011` for administration;
 - `http://192.168.21.250:3012/health` for the API health response.
 
-The administration application asks for `HOME_GALLERY_API_TOKEN` and keeps it only in the browser session. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `192.168.21.250`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless a separate LAN reverse proxy terminates ports 80 or 443.
+The administration application asks for `HOME_GALLERY_ADMIN_TOKEN` and keeps it only in the browser session. Browser uploads are rejected unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; leave the default in place when Telegram or another ingestion client is the only uploader. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `192.168.21.250`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless the supported TLS profile or another LAN reverse proxy terminates ports 80 or 443.
 
 Verify the isolated projects and occupied ports before and after first deployment:
 
@@ -83,6 +83,56 @@ docker compose --project-name tappa ps
 ```
 
 The Tappa output must remain unchanged, and Home Gallery must not bind ports `3000` through `3003`.
+
+## Supported public TLS profile
+
+Use this profile before exposing Home Gallery beyond a trusted LAN or authenticated private overlay. It requires two public DNS names that resolve to the deployment host and inbound TCP ports 80 and 443; UDP 443 enables HTTP/3. Caddy obtains and renews public certificates automatically. Do not use the example domains.
+
+Set these values in `.env`:
+
+```dotenv
+HOME_GALLERY_TLS_ENABLED=true
+HOME_GALLERY_HTTP_BIND_ADDRESS=127.0.0.1
+HOME_GALLERY_TLS_GALLERY_HOST=gallery.example.com
+HOME_GALLERY_TLS_ADMIN_HOST=admin.gallery.example.com
+HOME_GALLERY_TLS_HTTP_PORT=80
+HOME_GALLERY_TLS_HTTPS_PORT=443
+```
+
+Then deploy normally:
+
+```bash
+bash deploy.sh
+```
+
+`deploy.sh` automatically adds `docker-compose.tls.yml`, refuses TLS mode unless the direct HTTP bindings are loopback-only, validates both Compose files, and starts Caddy with the application. The gallery and administration names terminate TLS separately and proxy to their corresponding nginx containers. The API remains available through both HTTPS origins, while the direct `3010` through `3012` endpoints are reachable only from the host.
+
+Validate this profile without issuing a certificate or starting the stack:
+
+```bash
+npm run test:tls-config
+```
+
+This check resolves the merged Compose model, asserts the loopback-only HTTP bindings and private proxy trust, and asks the pinned Caddy image to validate `docker/Caddyfile`. Certificate state is stored in a dedicated Caddy volume. Preserve that volume across routine deployments; it is operational state but does not contain gallery media or application credentials.
+
+If Caddy runs behind another CDN or load balancer, do not automatically trust that intermediary's forwarded headers. Add only its documented egress CIDRs to Caddy and `HOME_GALLERY_TRUSTED_PROXIES`, and confirm the complete proxy chain with focused tests before relying on client-address rate limits.
+
+## Credential scope, rotation, and throttling
+
+Administration and ingestion credentials are independently rotatable. To rotate either credential without a synchronized outage:
+
+1. copy its current value into the matching `*_TOKEN_PREVIOUS` variable;
+2. generate and install a new primary value;
+3. run `bash deploy.sh`;
+4. update the administration browser sessions or Telegram bot as appropriate and verify the new value;
+5. clear the `*_TOKEN_PREVIOUS` value and deploy again;
+6. verify that the retired value returns `401` in its original scope.
+
+Never put an administration token in an ingestion variable merely to simplify rotation. `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` is the explicit compatibility control for browser uploads and should be enabled only when that feature is needed.
+
+Authentication failures default to 10 attempts per client address per 60 seconds. Authenticated uploads default to 30 attempts per client address per 60 seconds. Configure the two limits independently with `HOME_GALLERY_AUTH_RATE_LIMIT_*` and `HOME_GALLERY_UPLOAD_RATE_LIMIT_*`. A blocked request returns `429` and `Retry-After`; public gallery playback remains outside both limiters. The server logs the first limit event in a window with the proxy-aware client address and scope, then suppresses repeated limit events at the default log level so an attack cannot overwhelm useful logs.
+
+Forwarded client addresses are ignored by default. `HOME_GALLERY_TRUSTED_PROXIES` accepts only explicit IP addresses, CIDRs, or the documented `loopback`, `linklocal`, and `uniquelocal` range aliases. The supported TLS profile sets `uniquelocal` because the API is reachable only through loopback or the dedicated Compose network. Do not configure a trust-all proxy value, and do not expose the direct API port while trusting broad client-network ranges.
 
 ## Configuration validation and diagnostics
 
@@ -107,12 +157,12 @@ Startup fails early when required secrets, Telegram IDs, ports, upload and downl
 
 ## Security boundaries
 
-- Treat the default HTTP endpoints as trusted-LAN services. Put a TLS reverse proxy or authenticated private network in front of them before crossing an untrusted network; the administration bearer token is otherwise sent in cleartext over HTTP.
+- Treat the default HTTP endpoints as trusted-LAN services. Enable the supported TLS profile or use an authenticated private network before crossing an untrusted network; bearer credentials are otherwise sent in cleartext over HTTP.
 - The empty CORS allowlist is the production default because gallery and administration traffic is same-origin through nginx. Use explicit origins for split-origin development. `*` is an intentional escape hatch and should not be used for an exposed deployment.
 - The API rejects missing or invalid bearer tokens before reading upload bodies. It validates multipart counts and sizes, verifies image bytes, limits decoded pixels, applies EXIF orientation, and stores only normalized WebP files with server-generated names.
 - Telegram authorization occurs before file lookup or download. Both declared and streamed download sizes are bounded, and secrets are redacted from bot and API error logs.
 - Containers run without added Linux capabilities, with read-only root filesystems and `no-new-privileges`. The web applications send a restrictive Content Security Policy and other defensive browser headers.
-- Keep `.env` at mode `600`, rotate both bot and API tokens after suspected disclosure, and never paste them into issue, pull request, or diagnostic output.
+- Keep `.env` at mode `600`, rotate the BotFather, administration, and ingestion credentials after suspected disclosure, and never paste them into issue, pull request, or diagnostic output.
 
 The complete authorization, input, dependency, recovery, and MVP review is recorded in [VALIDATION.md](VALIDATION.md).
 
@@ -220,11 +270,14 @@ Configure these repository or production-environment secrets:
 - `HOME_GALLERY_DEPLOY_HOST`;
 - `HOME_GALLERY_DEPLOY_USER`;
 - `HOME_GALLERY_DEPLOY_SSH_KEY`;
-- `HOME_GALLERY_API_TOKEN`;
+- `HOME_GALLERY_ADMIN_TOKEN`;
+- `HOME_GALLERY_INGESTION_TOKEN`;
 - `HOME_GALLERY_TELEGRAM_BOT_TOKEN`;
 - `HOME_GALLERY_TELEGRAM_ALLOWED_USER_IDS`.
 
-Optional Actions variables `HOME_GALLERY_GALLERY_PORT`, `HOME_GALLERY_ADMIN_PORT`, and `HOME_GALLERY_API_PORT` override the three defaults. Use a dedicated Tailscale ACL grant for the CI tag and restrict the SSH key to the deployment host.
+Optional previous-token secrets `HOME_GALLERY_ADMIN_TOKEN_PREVIOUS` and `HOME_GALLERY_INGESTION_TOKEN_PREVIOUS` support the documented overlap window. Optional Actions variables configure ports, limits, proxy trust, and administration uploads using the matching `.env.example` names.
+
+To enable automated TLS deployment, set `HOME_GALLERY_TLS_ENABLED=true`, `HOME_GALLERY_HTTP_BIND_ADDRESS=127.0.0.1`, `HOME_GALLERY_TLS_GALLERY_HOST`, and `HOME_GALLERY_TLS_ADMIN_HOST` as Actions variables. Optional `HOME_GALLERY_TLS_HTTP_PORT` and `HOME_GALLERY_TLS_HTTPS_PORT` variables override ports 80 and 443. Use a dedicated Tailscale ACL grant for the CI tag and restrict the SSH key to the deployment host.
 
 The deployment concurrency group is Home Gallery-specific and does not cancel an in-progress deployment. Failures print Compose state and recent logs for all four services.
 

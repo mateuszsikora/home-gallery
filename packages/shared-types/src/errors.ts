@@ -12,6 +12,7 @@ export const API_ERROR_CODES = [
   'not_found',
   'conflict',
   'payload_too_large',
+  'rate_limited',
   'unsupported_media_type',
   'internal_error',
 ] as const;
@@ -48,6 +49,7 @@ export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
   not_found: 404,
   conflict: 409,
   payload_too_large: 413,
+  rate_limited: 429,
   unsupported_media_type: 415,
   internal_error: 500,
 };
