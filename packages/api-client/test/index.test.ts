@@ -73,6 +73,7 @@ describe('createHomeGalleryClient', () => {
           slideDurationMs: 8_000,
           fadeDurationMs: 1_000,
           playbackMode: 'sequential',
+          imageFit: 'blur',
         },
       });
     };
@@ -134,6 +135,7 @@ describe('createHomeGalleryClient', () => {
       slideDurationMs: 8_000,
       fadeDurationMs: 1_000,
       playbackMode: 'sequential',
+      imageFit: 'blur',
     } as const;
     const client = createHomeGalleryClient({
       baseUrl: 'https://gallery.example.test',

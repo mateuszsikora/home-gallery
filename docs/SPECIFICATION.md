@@ -79,6 +79,8 @@ The gallery is accessible through a web browser at a route such as `/` or `/scre
 
 It must fill the screen, play media automatically, preload upcoming images, periodically refresh the playlist, support portrait and landscape images, and require no user interaction for normal playback.
 
+A photo whose aspect ratio does not match the display is fitted according to the configured image fit: letterboxed, letterboxed over a blurred copy of itself, or cropped to fill when little of the photo is lost.
+
 ### 6.4 Slideshow
 
 The slideshow supports automatic slide changes, smooth transitions, configurable slide and transition durations, and sequential or shuffled playback. Fade is the only required MVP transition.

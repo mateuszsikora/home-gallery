@@ -7,7 +7,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { PlaylistResponse } from '@home-gallery/shared-types';
 
-import { Gallery, type PlaylistClient } from '../src/gallery.js';
+import {
+  Gallery,
+  resolveSlideLayout,
+  type PlaylistClient,
+} from '../src/gallery.js';
 
 const ids = {
   first: '00000000-0000-4000-8000-000000000001',
@@ -15,21 +19,30 @@ const ids = {
   third: '00000000-0000-4000-8000-000000000003',
 } as const;
 
+interface ItemSize {
+  readonly height: number;
+  readonly width: number;
+}
+
+const LANDSCAPE: ItemSize = { height: 1_080, width: 1_920 };
+
 const createPlaylist = (
   itemIds: readonly string[],
   overrides: Partial<PlaylistResponse['settings']> = {},
+  size: ItemSize = LANDSCAPE,
 ): PlaylistResponse => ({
   items: itemIds.map((id) => ({
     id,
     contentUrl: `/media/${id}`,
     mimeType: 'image/webp',
-    width: 1_920,
-    height: 1_080,
+    width: size.width,
+    height: size.height,
   })),
   settings: {
     slideDurationMs: 4_000,
     fadeDurationMs: 800,
     playbackMode: 'sequential',
+    imageFit: 'contain',
     ...overrides,
   },
 });
@@ -56,9 +69,29 @@ const renderedImages = (): HTMLImageElement[] => [
   ...document.querySelectorAll<HTMLImageElement>('img[data-state]'),
 ];
 
+const backdropImages = (): HTMLImageElement[] => [
+  ...document.querySelectorAll<HTMLImageElement>('img.gallery__backdrop'),
+];
+
+const resizeViewport = async (width: number, height: number): Promise<void> => {
+  window.innerWidth = width;
+  window.innerHeight = height;
+
+  await act(async () => {
+    window.dispatchEvent(new Event('resize'));
+  });
+};
+
+const DEFAULT_VIEWPORT = {
+  height: window.innerHeight,
+  width: window.innerWidth,
+} as const;
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  window.innerWidth = DEFAULT_VIEWPORT.width;
+  window.innerHeight = DEFAULT_VIEWPORT.height;
 });
 
 describe('Gallery', () => {
@@ -288,5 +321,100 @@ describe('Gallery', () => {
     expect(preloadImage).toHaveBeenCalledWith(
       `http://api.test:3012/media/${ids.third}`,
     );
+  });
+});
+
+describe('resolveSlideLayout', () => {
+  const portrait = { height: 1_920, width: 1_080 };
+  const wideScreen = 16 / 10;
+
+  it('never crops or blurs in contain mode', () => {
+    expect(resolveSlideLayout('contain', portrait, wideScreen)).toBe('contain');
+  });
+
+  it('leaves an almost matching photo alone in every mode', () => {
+    const almostWide = { height: 1_000, width: 1_601 };
+
+    expect(resolveSlideLayout('blur', almostWide, wideScreen)).toBe('contain');
+    expect(resolveSlideLayout('auto', almostWide, wideScreen)).toBe('contain');
+  });
+
+  it('fills the mismatch with a blurred backdrop in blur mode', () => {
+    expect(resolveSlideLayout('blur', portrait, wideScreen)).toBe('blurred');
+    expect(
+      resolveSlideLayout('blur', { height: 1_000, width: 1_500 }, wideScreen),
+    ).toBe('blurred');
+  });
+
+  it('crops in auto mode only within the mismatch limit', () => {
+    expect(
+      resolveSlideLayout('auto', { height: 1_000, width: 1_500 }, wideScreen),
+    ).toBe('cover');
+    expect(
+      resolveSlideLayout('auto', { height: 1_000, width: 1_200 }, wideScreen),
+    ).toBe('blurred');
+    expect(resolveSlideLayout('auto', portrait, wideScreen)).toBe('blurred');
+  });
+
+  it('falls back to contain for unusable dimensions', () => {
+    expect(
+      resolveSlideLayout('blur', { height: 0, width: 1_080 }, wideScreen),
+    ).toBe('contain');
+    expect(resolveSlideLayout('blur', portrait, Number.NaN)).toBe('contain');
+  });
+});
+
+describe('Gallery screen fit', () => {
+  const portrait = { height: 1_920, width: 1_080 };
+
+  const renderWithFit = async (
+    imageFit: PlaylistResponse['settings']['imageFit'],
+    size: { height: number; width: number },
+  ): Promise<void> => {
+    const client: PlaylistClient = {
+      getPlaylist: vi
+        .fn()
+        .mockResolvedValue(createPlaylist([ids.first], { imageFit }, size)),
+    };
+
+    render(<Gallery apiBaseUrl="http://gallery.test" client={client} />);
+    await flushPromises();
+  };
+
+  it('backs a mismatching photo with a blurred copy of the same image', async () => {
+    await renderWithFit('blur', portrait);
+
+    const [backdrop] = backdropImages();
+    expect(backdrop).toBeDefined();
+    expect(backdrop).toHaveAttribute(
+      'src',
+      currentImage().getAttribute('src') as string,
+    );
+    expect(backdrop).toHaveAttribute('aria-hidden', 'true');
+    expect(currentImage()).toHaveClass('gallery__image--blurred');
+  });
+
+  it('leaves the black bars in place in contain mode', async () => {
+    await renderWithFit('contain', portrait);
+
+    expect(backdropImages()).toHaveLength(0);
+    expect(currentImage()).toHaveClass('gallery__image--contain');
+  });
+
+  it('crops a nearly matching photo in auto mode', async () => {
+    await renderWithFit('auto', { height: 1_000, width: 1_400 });
+
+    expect(backdropImages()).toHaveLength(0);
+    expect(currentImage()).toHaveClass('gallery__image--cover');
+  });
+
+  it('drops the backdrop once the viewport matches the photo', async () => {
+    await renderWithFit('blur', portrait);
+    expect(backdropImages()).toHaveLength(1);
+
+    await resizeViewport(portrait.width, portrait.height);
+
+    expect(backdropImages()).toHaveLength(0);
+    expect(currentImage()).toHaveClass('gallery__image--contain');
   });
 });

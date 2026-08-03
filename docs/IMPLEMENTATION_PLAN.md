@@ -73,7 +73,7 @@ Each media record contains:
 
 SQLite stores metadata, settings, and Telegram contributor approval state. Media bytes live under a configurable data directory mounted as a persistent Docker volume. Database writes and file moves must avoid leaving a record without a file or an untracked permanent file after a failed request.
 
-Initial gallery settings are slide duration, fade duration, and sequential or shuffled playback.
+Initial gallery settings are slide duration, fade duration, sequential or shuffled playback, and how a photo that does not match the shape of the display is fitted to the screen.
 
 ## 5. Implementation sequence
 

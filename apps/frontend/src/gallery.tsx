@@ -7,6 +7,7 @@ import {
 
 import type { HomeGalleryClient } from '@home-gallery/api-client';
 import type {
+  ImageFit,
   PlaybackMode,
   PlaylistItem,
   PlaylistResponse,
@@ -29,6 +30,22 @@ export interface GalleryProps {
 }
 
 const DEFAULT_REFRESH_INTERVAL_MS = 30_000;
+
+/**
+ * How a slide is laid out: letterboxed, letterboxed over a blurred copy of
+ * itself, or cropped to fill the screen.
+ */
+export type SlideLayout = 'contain' | 'blurred' | 'cover';
+
+/** Below this the letterbox bars are too thin to be worth filling. */
+const ASPECT_MATCH_TOLERANCE = 0.01;
+
+/**
+ * `auto` only crops while the two aspect ratios differ by at most this much,
+ * which keeps a 3:2 photo full-bleed on a 16:10 screen but never cuts a
+ * portrait photo in half.
+ */
+const AUTO_COVER_MISMATCH_LIMIT = 0.15;
 
 const defaultPreloadImage = (url: string): void => {
   const image = new Image();
@@ -100,27 +117,103 @@ export const resolveContentUrl = (
   apiBaseUrl: string,
 ): string => new URL(contentUrl, apiBaseUrl).toString();
 
+/**
+ * Symmetric disagreement between two aspect ratios: `0` when they match and
+ * `0.5` when one is half again as wide as the other, whichever way round.
+ */
+export const aspectMismatch = (
+  imageAspect: number,
+  viewportAspect: number,
+): number =>
+  Math.max(imageAspect / viewportAspect, viewportAspect / imageAspect) - 1;
+
+/**
+ * Stored dimensions are already EXIF-oriented by the server, so the client can
+ * decide the layout without waiting for the image to load.
+ */
+export const resolveSlideLayout = (
+  fit: ImageFit,
+  item: Pick<PlaylistItem, 'height' | 'width'>,
+  viewportAspect: number,
+): SlideLayout => {
+  const imageAspect = item.width / item.height;
+
+  if (
+    fit === 'contain' ||
+    !Number.isFinite(imageAspect) ||
+    !Number.isFinite(viewportAspect) ||
+    imageAspect <= 0 ||
+    viewportAspect <= 0
+  ) {
+    return 'contain';
+  }
+
+  const mismatch = aspectMismatch(imageAspect, viewportAspect);
+
+  if (mismatch <= ASPECT_MATCH_TOLERANCE) {
+    return 'contain';
+  }
+
+  return fit === 'auto' && mismatch <= AUTO_COVER_MISMATCH_LIMIT
+    ? 'cover'
+    : 'blurred';
+};
+
+const readViewportAspect = (): number => {
+  const { innerHeight, innerWidth } = window;
+
+  return innerHeight > 0 ? innerWidth / innerHeight : 1;
+};
+
+const useViewportAspect = (): number => {
+  const [aspect, setAspect] = useState(readViewportAspect);
+
+  useEffect(() => {
+    const update = (): void => {
+      setAspect(readViewportAspect());
+    };
+
+    update();
+    window.addEventListener('resize', update);
+
+    return () => {
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+
+  return aspect;
+};
+
 const itemById = (
   playlist: PlaylistResponse,
   id: string | undefined,
 ): PlaylistItem | undefined => playlist.items.find((item) => item.id === id);
 
-const imageElement = (
+const slideElement = (
   item: PlaylistItem,
   apiBaseUrl: string,
   state: 'current' | 'previous',
-): ReactElement => (
-  <img
-    alt=""
-    className={`gallery__image gallery__image--${state}`}
-    data-state={state}
-    decoding="async"
-    height={item.height}
-    key={item.id}
-    src={resolveContentUrl(item.contentUrl, apiBaseUrl)}
-    width={item.width}
-  />
-);
+  layout: SlideLayout,
+): ReactElement => {
+  const source = resolveContentUrl(item.contentUrl, apiBaseUrl);
+
+  return (
+    <div className={`gallery__slide gallery__slide--${state}`} key={item.id}>
+      {layout === 'blurred' ? (
+        <img alt="" aria-hidden className="gallery__backdrop" src={source} />
+      ) : null}
+      <img
+        alt=""
+        className={`gallery__image gallery__image--${layout}`}
+        data-state={state}
+        decoding="async"
+        height={item.height}
+        src={source}
+        width={item.width}
+      />
+    </div>
+  );
+};
 
 export const Gallery = ({
   apiBaseUrl,
@@ -131,6 +224,7 @@ export const Gallery = ({
 }: GalleryProps): ReactElement => {
   const [playlist, setPlaylist] = useState<PlaylistResponse>();
   const [connectionFailed, setConnectionFailed] = useState(false);
+  const viewportAspect = useViewportAspect();
   const [previousId, setPreviousId] = useState<string>();
   const [playback, setPlayback] = useState<PlaybackState>({
     currentId: undefined,
@@ -291,6 +385,8 @@ export const Gallery = ({
   const galleryStyle = {
     '--fade-duration': `${playlist.settings.fadeDurationMs}ms`,
   } as CSSProperties;
+  const layoutFor = (item: PlaylistItem): SlideLayout =>
+    resolveSlideLayout(playlist.settings.imageFit, item, viewportAspect);
 
   return (
     <main aria-label="Photo gallery" className="gallery" style={galleryStyle}>
@@ -299,11 +395,16 @@ export const Gallery = ({
           Preparing gallery…
         </p>
       ) : (
-        imageElement(currentItem, apiBaseUrl, 'current')
+        slideElement(currentItem, apiBaseUrl, 'current', layoutFor(currentItem))
       )}
       {previousItem === undefined
         ? null
-        : imageElement(previousItem, apiBaseUrl, 'previous')}
+        : slideElement(
+            previousItem,
+            apiBaseUrl,
+            'previous',
+            layoutFor(previousItem),
+          )}
       {connectionFailed ? (
         <p aria-live="polite" className="gallery__status" role="status">
           Connection lost. Continuing with the last playlist.

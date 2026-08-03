@@ -1,5 +1,6 @@
 import {
   DEFAULT_GALLERY_SETTINGS,
+  IMAGE_FIT_MODES,
   MEDIA_TYPES,
   NORMALIZED_MEDIA_MIME_TYPES,
   PLAYBACK_MODES,
@@ -92,6 +93,21 @@ const MIGRATIONS: readonly Migration[] = [
 
         CREATE INDEX telegram_contributors_status_idx
           ON telegram_contributors (status, requested_at);
+      `);
+    },
+  },
+  {
+    version: 4,
+    name: 'add_gallery_settings_image_fit',
+    apply: (database) => {
+      // The column default also backfills the existing settings row, so a
+      // gallery that was installed before this migration adopts the same
+      // screen-filling behavior as a fresh one.
+      database.exec(`
+        ALTER TABLE gallery_settings
+          ADD COLUMN image_fit TEXT NOT NULL
+            DEFAULT '${DEFAULT_GALLERY_SETTINGS.imageFit}'
+            CHECK (image_fit IN (${quotedList(IMAGE_FIT_MODES)}));
       `);
     },
   },
