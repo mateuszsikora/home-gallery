@@ -20,8 +20,8 @@ describe('migrations', () => {
   });
 
   it('applies every migration on a fresh database', () => {
-    expect(migrate(database)).toEqual([1, 2, 3]);
-    expect(LATEST_SCHEMA_VERSION).toBe(3);
+    expect(migrate(database)).toEqual([1, 2, 3, 4]);
+    expect(LATEST_SCHEMA_VERSION).toBe(4);
   });
 
   it('is repeatable', () => {
@@ -34,7 +34,7 @@ describe('migrations', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all() as { version: number }[];
 
-    expect(rows.map((row) => row.version)).toEqual([1, 2, 3]);
+    expect(rows.map((row) => row.version)).toEqual([1, 2, 3, 4]);
   });
 
   it('seeds deterministic default gallery settings', () => {
@@ -54,6 +54,33 @@ describe('migrations', () => {
     expect(createSettingsRepository(database).read().slideDurationMs).toBe(
       12_000,
     );
+  });
+
+  it('backfills the image fit of a gallery installed before the setting existed', () => {
+    migrate(database);
+    createSettingsRepository(database).update({ slideDurationMs: 12_000 });
+    database.exec(`
+      ALTER TABLE gallery_settings DROP COLUMN image_fit;
+      DELETE FROM schema_migrations WHERE version = 4;
+    `);
+
+    expect(migrate(database)).toEqual([4]);
+    expect(createSettingsRepository(database).read()).toEqual({
+      ...DEFAULT_GALLERY_SETTINGS,
+      slideDurationMs: 12_000,
+    });
+  });
+
+  it('rejects an unknown image fit', () => {
+    migrate(database);
+
+    expect(() =>
+      database
+        .prepare(
+          "UPDATE gallery_settings SET image_fit = 'stretch' WHERE id = 1",
+        )
+        .run(),
+    ).toThrow();
   });
 
   it('rejects Telegram contributor rows with an unknown status', () => {

@@ -71,6 +71,7 @@ const settings: GallerySettings = {
   slideDurationMs: 8_000,
   fadeDurationMs: 1_000,
   playbackMode: 'sequential',
+  imageFit: 'blur',
 };
 
 interface ClientMocks {
@@ -474,6 +475,8 @@ describe('AdminApp', () => {
     const mocks = createClientMocks([]);
     await openStudio(mocks.client);
 
+    expect(screen.getByRole('radio', { name: /Blurred edges/ })).toBeChecked();
+
     const slideDuration = screen.getByLabelText(/Time per photo/);
     const fadeDuration = screen.getByLabelText(/Fade duration/);
     await user.clear(slideDuration);
@@ -481,6 +484,7 @@ describe('AdminApp', () => {
     await user.clear(fadeDuration);
     await user.type(fadeDuration, '2');
     await user.click(screen.getByRole('radio', { name: /Shuffle/ }));
+    await user.click(screen.getByRole('radio', { name: /Plain black bars/ }));
     await user.click(
       screen.getByRole('button', { name: 'Save playback settings' }),
     );
@@ -490,6 +494,7 @@ describe('AdminApp', () => {
         slideDurationMs: 12_500,
         fadeDurationMs: 2_000,
         playbackMode: 'shuffle',
+        imageFit: 'contain',
       });
     });
     expect(

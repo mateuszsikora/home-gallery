@@ -3,6 +3,7 @@ import {
   apiErrorBodySchema,
   DEFAULT_GALLERY_SETTINGS,
   gallerySettingsSchema,
+  IMAGE_FIT_MODES,
   MAX_SLIDE_DURATION_MS,
   MIN_SLIDE_DURATION_MS,
 } from '@home-gallery/shared-types';
@@ -112,6 +113,23 @@ describe('gallery settings routes', () => {
 
     expect(response.statusCode).toBe(422);
     expect(app.settingsRepository.read()).toEqual(DEFAULT_GALLERY_SETTINGS);
+  });
+
+  it('stores every documented image fit and rejects the rest', async () => {
+    for (const imageFit of IMAGE_FIT_MODES) {
+      const response = await patchSettings({ imageFit });
+
+      expect(response.statusCode).toBe(200);
+      expect(app.settingsRepository.read().imageFit).toBe(imageFit);
+    }
+
+    const rejected = await patchSettings({ imageFit: 'stretch' });
+
+    expect(rejected.statusCode).toBe(422);
+    expect(apiErrorBodySchema.parse(rejected.json()).error).toMatchObject({
+      code: 'validation_failed',
+      issues: [{ path: 'imageFit' }],
+    });
   });
 
   it('rejects an empty update', async () => {

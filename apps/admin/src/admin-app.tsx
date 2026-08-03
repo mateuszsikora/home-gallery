@@ -14,6 +14,7 @@ import {
 } from '@home-gallery/api-client';
 import type {
   GallerySettings,
+  ImageFit,
   MediaRecord,
   PlaybackMode,
   TelegramContributor,
@@ -44,14 +45,40 @@ export interface AdminAppProps {
 
 interface SettingsDraft {
   readonly fadeDurationSeconds: string;
+  readonly imageFit: ImageFit;
   readonly playbackMode: PlaybackMode;
   readonly slideDurationSeconds: string;
 }
 
 type Phase = 'loading' | 'ready' | 'signed-out';
 
+interface ImageFitChoice {
+  readonly description: string;
+  readonly label: string;
+  readonly value: ImageFit;
+}
+
+const IMAGE_FIT_CHOICES: readonly ImageFitChoice[] = [
+  {
+    description: 'Show the whole photo over a blurred copy of itself.',
+    label: 'Blurred edges',
+    value: 'blur',
+  },
+  {
+    description: 'Fill the screen when little is lost, blur otherwise.',
+    label: 'Crop when it barely shows',
+    value: 'auto',
+  },
+  {
+    description: 'Never crop, never blur; leave black bars.',
+    label: 'Plain black bars',
+    value: 'contain',
+  },
+];
+
 const toSettingsDraft = (settings: GallerySettings): SettingsDraft => ({
   fadeDurationSeconds: String(settings.fadeDurationMs / 1_000),
+  imageFit: settings.imageFit,
   playbackMode: settings.playbackMode,
   slideDurationSeconds: String(settings.slideDurationMs / 1_000),
 });
@@ -597,6 +624,7 @@ export const AdminApp = ({
     try {
       const updated = await client.updateSettings({
         fadeDurationMs,
+        imageFit: settingsDraft.imageFit,
         playbackMode: settingsDraft.playbackMode,
         slideDurationMs,
       });
@@ -1029,6 +1057,31 @@ export const AdminApp = ({
                     <small>Begin with a fresh random order.</small>
                   </span>
                 </label>
+              </fieldset>
+
+              <fieldset>
+                <legend>Photos that do not fit the screen</legend>
+                {IMAGE_FIT_CHOICES.map(({ description, label, value }) => (
+                  <label className="radio-card" key={value}>
+                    <input
+                      checked={settingsDraft.imageFit === value}
+                      name="imageFit"
+                      onChange={() => {
+                        setSettingsDraft((draft) =>
+                          draft === undefined
+                            ? draft
+                            : { ...draft, imageFit: value },
+                        );
+                      }}
+                      type="radio"
+                      value={value}
+                    />
+                    <span>
+                      <strong>{label}</strong>
+                      <small>{description}</small>
+                    </span>
+                  </label>
+                ))}
               </fieldset>
 
               <button

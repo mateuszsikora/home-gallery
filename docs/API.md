@@ -158,12 +158,13 @@ An unknown or malformed media identifier is reported as `not_found`.
   "settings": {
     "slideDurationMs": 8000,
     "fadeDurationMs": 1000,
-    "playbackMode": "sequential"
+    "playbackMode": "sequential",
+    "imageFit": "blur"
   }
 }
 ```
 
-Items are listed in playlist order. `settings.playbackMode` tells the client whether to play them in that order or to shuffle them, so the response itself stays deterministic.
+Items are listed in playlist order. `settings.playbackMode` tells the client whether to play them in that order or to shuffle them, so the response itself stays deterministic. `width` and `height` describe the stored image after its EXIF orientation has been applied, which is what lets the client resolve `settings.imageFit` per photo.
 
 `GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response, and all three cases answer identically so an unauthenticated caller cannot tell them apart.
 
@@ -226,8 +227,19 @@ Only `telegramUserId` is required, and the caller cannot propose a status. The r
 {
   "slideDurationMs": 10000,
   "fadeDurationMs": 1500,
-  "playbackMode": "shuffle"
+  "playbackMode": "shuffle",
+  "imageFit": "blur"
 }
 ```
 
 Slide duration must be between 1,000 and 3,600,000 milliseconds. Fade duration must be between 0 and 10,000 milliseconds. Playback mode is `sequential` or `shuffle`.
+
+Image fit decides what the gallery does when a photo does not match the shape of the display, which is what a portrait photo on a landscape wall tablet always does:
+
+| Value     | Behavior                                                                                       |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| `blur`    | Show the whole photo and fill the remaining area with a blurred, scaled copy of the same image |
+| `auto`    | Crop to fill while the mismatch stays small, and fall back to the blurred backdrop otherwise   |
+| `contain` | Never crop and never blur, leaving black bars                                                  |
+
+`blur` is the default. The decision is made per photo from its stored dimensions and the current viewport, so a photo that already matches the display is rendered as a single image either way.

@@ -15,6 +15,7 @@ interface SettingsRow {
   slide_duration_ms: number;
   fade_duration_ms: number;
   playback_mode: string;
+  image_fit: string;
 }
 
 /** The settings row is seeded by a migration, so it is always present. */
@@ -29,14 +30,15 @@ export const createSettingsRepository = (
   database: DatabaseConnection,
 ): SettingsRepository => {
   const selectStatement = database.prepare(
-    `SELECT slide_duration_ms, fade_duration_ms, playback_mode
+    `SELECT slide_duration_ms, fade_duration_ms, playback_mode, image_fit
      FROM gallery_settings WHERE id = 1`,
   );
   const updateStatement = database.prepare(
     `UPDATE gallery_settings
      SET slide_duration_ms = @slideDurationMs,
          fade_duration_ms = @fadeDurationMs,
-         playback_mode = @playbackMode
+         playback_mode = @playbackMode,
+         image_fit = @imageFit
      WHERE id = 1`,
   );
 
@@ -51,6 +53,7 @@ export const createSettingsRepository = (
       slideDurationMs: row.slide_duration_ms,
       fadeDurationMs: row.fade_duration_ms,
       playbackMode: row.playback_mode,
+      imageFit: row.image_fit,
     });
   };
 
