@@ -11,7 +11,7 @@ export type PlaybackMode = z.infer<typeof playbackModeSchema>;
  * How a photo is laid out when its aspect ratio disagrees with the display:
  * `contain` letterboxes it, `blur` keeps it whole and fills the remaining area
  * with a blurred copy of the same photo, and `auto` crops to fill instead
- * whenever the mismatch is small enough that little of the photo is lost.
+ * whenever the crop would hide no more than about a quarter of the photo.
  */
 export const IMAGE_FIT_MODES = ['contain', 'blur', 'auto'] as const;
 

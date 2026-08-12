@@ -65,7 +65,7 @@ const IMAGE_FIT_CHOICES: readonly ImageFitChoice[] = [
     value: 'blur',
   },
   {
-    description: 'Fill the screen when little is lost, blur otherwise.',
+    description: 'Fill the screen while at most a quarter is cut, blur beyond.',
     label: 'Crop when it barely shows',
     value: 'auto',
   },

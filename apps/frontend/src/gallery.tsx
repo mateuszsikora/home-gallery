@@ -41,11 +41,12 @@ export type SlideLayout = 'contain' | 'blurred' | 'cover';
 const ASPECT_MATCH_TOLERANCE = 0.01;
 
 /**
- * `auto` only crops while the two aspect ratios differ by at most this much,
- * which keeps a 3:2 photo full-bleed on a 16:10 screen but never cuts a
- * portrait photo in half.
+ * `auto` only crops while the crop hides at most this much of the photo, which
+ * keeps a phone's 4:3 photo full-bleed on both a 16:10 and a 16:9 screen — the
+ * common pairings, losing 0.17 and 0.25 of the frame — but never cuts a
+ * portrait photo down to a landscape strip.
  */
-const AUTO_COVER_MISMATCH_LIMIT = 0.15;
+const AUTO_COVER_LOSS_LIMIT = 0.3;
 
 const defaultPreloadImage = (url: string): void => {
   const image = new Image();
@@ -118,14 +119,22 @@ export const resolveContentUrl = (
 ): string => new URL(contentUrl, apiBaseUrl).toString();
 
 /**
- * Symmetric disagreement between two aspect ratios: `0` when they match and
- * `0.5` when one is half again as wide as the other, whichever way round.
+ * Fraction of the photo that a crop to fill the screen hides: `0` when the two
+ * aspect ratios match and `0.25` when a quarter of the frame is cut away. The
+ * measure is symmetric, so it covers both a photo wider than the screen and a
+ * photo taller than it.
  */
-export const aspectMismatch = (
+export const coverCropLoss = (
   imageAspect: number,
   viewportAspect: number,
-): number =>
-  Math.max(imageAspect / viewportAspect, viewportAspect / imageAspect) - 1;
+): number => {
+  const overhang = Math.max(
+    imageAspect / viewportAspect,
+    viewportAspect / imageAspect,
+  );
+
+  return 1 - 1 / overhang;
+};
 
 /**
  * Stored dimensions are already EXIF-oriented by the server, so the client can
@@ -148,15 +157,13 @@ export const resolveSlideLayout = (
     return 'contain';
   }
 
-  const mismatch = aspectMismatch(imageAspect, viewportAspect);
+  const loss = coverCropLoss(imageAspect, viewportAspect);
 
-  if (mismatch <= ASPECT_MATCH_TOLERANCE) {
+  if (loss <= ASPECT_MATCH_TOLERANCE) {
     return 'contain';
   }
 
-  return fit === 'auto' && mismatch <= AUTO_COVER_MISMATCH_LIMIT
-    ? 'cover'
-    : 'blurred';
+  return fit === 'auto' && loss <= AUTO_COVER_LOSS_LIMIT ? 'cover' : 'blurred';
 };
 
 const readViewportAspect = (): number => {
