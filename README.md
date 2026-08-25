@@ -8,6 +8,16 @@ The MVP HTTP routes and representative payloads are documented in [docs/API.md](
 
 Production images, Docker Compose deployment, backup and restore, rollback, and the Tailscale/SSH delivery workflow are documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+## Project status
+
+Home Gallery is a personal project published so others can read, fork, and adapt it. It is maintained on a best-effort basis: issues and pull requests are welcome, but there is no support commitment or release schedule. Run it on a trusted network and review [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
+
+The container images referenced by `docker-compose.yml` are published to a private GHCR namespace. Unless you have access to those packages, build them locally instead of pulling:
+
+```bash
+docker compose --env-file .env build
+```
+
 ## Local development
 
 The foundation requires Node.js 24 and the npm version bundled with it. From a clean checkout:
@@ -105,7 +115,7 @@ Each application will remain independently deployable and communicate through pu
 
 ## Deployment target
 
-The MVP will run on the same LAN server as Tappa (`192.168.21.250`) while remaining an independent stack. Home Gallery will use its own Compose project, configuration directory, secrets, ports, containers, network, and persistent data. The deployment plan deliberately follows Tappa's proven private-GHCR and Tailscale/SSH delivery workflow without coupling either application's runtime.
+The MVP runs on a LAN server that may already host unrelated stacks, so Home Gallery stays self-contained: it uses its own Compose project, configuration directory, secrets, ports, containers, network, and persistent data, and never addresses another project's resources. Delivery uses a private GHCR registry and a Tailscale/SSH workflow.
 
 From a configured production checkout, validate and start the isolated stack with:
 

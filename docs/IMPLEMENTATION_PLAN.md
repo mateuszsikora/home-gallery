@@ -8,7 +8,7 @@ The MVP is complete when a permitted Telegram user can submit an image, the serv
 
 ## 2. Technical direction
 
-The repository will be an npm-workspaces TypeScript monorepo targeting Node.js 24 to match the established Tappa CI and container baseline.
+The repository will be an npm-workspaces TypeScript monorepo targeting Node.js 24 to match the established CI and container baseline of the deployment host.
 
 ```text
 home-gallery/
@@ -103,15 +103,15 @@ The matching GitHub issues are the source of truth for execution state. This doc
 
 ## 6. Deployment target and coexistence
 
-The first production target is the existing LAN server at `192.168.21.250`, which also runs Tappa. The private [Tappa repository](https://github.com/mateuszsikora/tappa) establishes the host's current deployment pattern:
+The first production target is an existing LAN server that already runs unrelated Compose projects. The established deployment pattern on that host is:
 
 - Linux `amd64` images are built by GitHub Actions and published to private GHCR packages;
 - after a default-branch merge, GitHub Actions connects through Tailscale and transfers infrastructure files over SSH/rsync;
 - an on-host deploy script pulls immutable `sha-*` or `latest` image tags, runs Docker Compose, and verifies health checks;
 - on-host secrets are created with restrictive permissions and are never committed;
-- Tappa owns `$HOME/tappa/infra`, Compose project/container names prefixed with `tappa`, its own network and volumes, and host ports `3000` through `3003`.
+- each project owns a prefixed directory under `$HOME`, prefixed Compose project and container names, its own network and volumes, and a distinct host port range.
 
-Home Gallery must reuse the operational pattern, not Tappa's resources. Its planned defaults are:
+Home Gallery must reuse the operational pattern, not another project's resources. Its planned defaults are:
 
 | Resource              | Home Gallery value                         |
 | --------------------- | ------------------------------------------ |
@@ -125,9 +125,9 @@ Home Gallery must reuse the operational pattern, not Tappa's resources. Its plan
 | Persistent data       | Dedicated media and SQLite volume or mount |
 | Images                | `ghcr.io/mateuszsikora/home-gallery-*`     |
 
-All host ports must remain environment-configurable. Home Gallery deployment automation must use its own GitHub secrets, deployment concurrency group, container names, network, and backup target. It must never stop, recreate, or use `--remove-orphans` against the Tappa Compose project. Rollback must be possible by redeploying a known `sha-*` image tag.
+All host ports must remain environment-configurable. Home Gallery deployment automation must use its own GitHub secrets, deployment concurrency group, container names, network, and backup target. It must never stop, recreate, or use `--remove-orphans` against a Compose project it does not own. Rollback must be possible by redeploying a known `sha-*` image tag.
 
-SQLite metadata and original/normalized media need a coordinated backup procedure; Tappa's PostgreSQL-only backup script cannot be reused. The deployment issue must include a restore test and capacity guidance because the media library can consume substantially more disk than Tappa's application data.
+SQLite metadata and original/normalized media need a coordinated backup procedure of their own. The deployment issue must include a restore test and capacity guidance because the media library can consume substantially more disk than typical application data.
 
 ## 7. Quality gates
 

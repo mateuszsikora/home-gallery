@@ -44,12 +44,12 @@ trap cleanup EXIT
 mkdir -p "$HOME_GALLERY_BACKUP_DIR"
 
 PROJECT_GUARD_OUTPUT=$(
-  HOME_GALLERY_COMPOSE_PROJECT=tappa \
+  HOME_GALLERY_COMPOSE_PROJECT=unrelated-project \
     "$REPOSITORY_ROOT/infra/deploy.sh" 2>&1 || true
 )
-if ! grep -q 'Refusing to address non-Home-Gallery Compose project: tappa' \
+if ! grep -q 'Refusing to address non-Home-Gallery Compose project: unrelated-project' \
   <<<"$PROJECT_GUARD_OUTPUT"; then
-  echo "ERROR: Deployment project isolation guard did not reject Tappa." >&2
+  echo "ERROR: Deployment project isolation guard did not reject a foreign project." >&2
   exit 1
 fi
 
