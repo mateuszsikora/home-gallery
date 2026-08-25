@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlaylistResponse } from '@home-gallery/shared-types';
 
 import {
+  coverCropLoss,
   Gallery,
   resolveSlideLayout,
   type PlaylistClient,
@@ -324,6 +325,17 @@ describe('Gallery', () => {
   });
 });
 
+describe('coverCropLoss', () => {
+  it('reports nothing lost when the photo already matches the screen', () => {
+    expect(coverCropLoss(16 / 9, 16 / 9)).toBe(0);
+  });
+
+  it('reports the same loss whichever side overhangs', () => {
+    expect(coverCropLoss(4 / 3, 16 / 9)).toBeCloseTo(0.25, 5);
+    expect(coverCropLoss(16 / 9, 4 / 3)).toBeCloseTo(0.25, 5);
+  });
+});
+
 describe('resolveSlideLayout', () => {
   const portrait = { height: 1_920, width: 1_080 };
   const wideScreen = 16 / 10;
@@ -346,14 +358,21 @@ describe('resolveSlideLayout', () => {
     ).toBe('blurred');
   });
 
-  it('crops in auto mode only within the mismatch limit', () => {
+  it('crops in auto mode only while little of the photo is lost', () => {
     expect(
       resolveSlideLayout('auto', { height: 1_000, width: 1_500 }, wideScreen),
     ).toBe('cover');
     expect(
-      resolveSlideLayout('auto', { height: 1_000, width: 1_200 }, wideScreen),
+      resolveSlideLayout('auto', { height: 1_000, width: 1_000 }, wideScreen),
     ).toBe('blurred');
     expect(resolveSlideLayout('auto', portrait, wideScreen)).toBe('blurred');
+  });
+
+  it('fills a landscape phone photo on both common wide screens', () => {
+    const phonePhoto = { height: 3_024, width: 4_032 };
+
+    expect(resolveSlideLayout('auto', phonePhoto, wideScreen)).toBe('cover');
+    expect(resolveSlideLayout('auto', phonePhoto, 16 / 9)).toBe('cover');
   });
 
   it('falls back to contain for unusable dimensions', () => {
