@@ -12,7 +12,7 @@ The production host needs:
 - outbound HTTPS access to GHCR and the Telegram Bot API;
 - an SSH user allowed to run Docker when automated deployment is enabled.
 
-The initial target is `192.168.21.250`. Tappa remains a separate Compose project and owns ports `3000` through `3003`. Home Gallery does not join Tappa's network, mount its volumes, address its containers, or run `--remove-orphans`.
+This guide writes the deployment host as `HOST` (an IP address or DNS name on your LAN); substitute your own value. When the host already runs other Compose projects, Home Gallery stays isolated from them: it never joins another project's network, mounts its volumes, addresses its containers, or runs `--remove-orphans`. The default host ports `3010` through `3012` are chosen to avoid the common `3000`–`3003` range and are configurable in `.env`.
 
 ## First installation
 
@@ -67,21 +67,21 @@ Media from a contributor who is pending or rejected is never looked up or downlo
 
 With the default ports, open:
 
-- `http://192.168.21.250:3010` for the unattended gallery;
-- `http://192.168.21.250:3011` for administration;
-- `http://192.168.21.250:3012/health` for the API health response.
+- `http://HOST:3010` for the unattended gallery;
+- `http://HOST:3011` for administration;
+- `http://HOST:3012/health` for the API health response.
 
-The administration application asks for `HOME_GALLERY_ADMIN_TOKEN` once and exchanges it for an opaque HttpOnly browser session; it does not store the bearer token. Browser uploads are rejected unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; leave the default in place when Telegram or another ingestion client is the only uploader. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `192.168.21.250`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless the supported TLS profile or another LAN reverse proxy terminates ports 80 or 443.
+The administration application asks for `HOME_GALLERY_ADMIN_TOKEN` once and exchanges it for an opaque HttpOnly browser session; it does not store the bearer token. Browser uploads are rejected unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; leave the default in place when Telegram or another ingestion client is the only uploader. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `HOST`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless the supported TLS profile or another LAN reverse proxy terminates ports 80 or 443.
 
-Verify the isolated projects and occupied ports before and after first deployment:
+When the host runs other Compose projects, verify their state and the occupied ports before and after first deployment:
 
 ```bash
-docker compose --project-name tappa ps
+docker compose --project-name OTHER_PROJECT ps
 docker compose --project-name home-gallery --env-file .env ps
-docker compose --project-name tappa ps
+docker compose --project-name OTHER_PROJECT ps
 ```
 
-The Tappa output must remain unchanged, and Home Gallery must not bind ports `3000` through `3003`.
+The other project's output must remain unchanged, and Home Gallery must bind only its own configured ports.
 
 ## Supported public TLS profile
 
@@ -312,5 +312,5 @@ Routine checks should cover:
 - **The bot exits:** validate the BotFather token and the ingestion credential, then inspect bot logs.
 - **A contributor is stuck waiting:** confirm their request is listed under **Contributors** in the administration application and approve it there; the bot reports every contact it could not register.
 - **An image pull is denied:** refresh `docker login ghcr.io` with an account or token allowed to read the private packages.
-- **A deployment fails:** leave Tappa untouched, inspect `docker compose --project-name home-gallery ... ps --all`, correct the cause, and rerun `deploy.sh`.
+- **A deployment fails:** leave any other Compose project untouched, inspect `docker compose --project-name home-gallery ... ps --all`, correct the cause, and rerun `deploy.sh`.
 - **A restore fails health checks:** inspect server logs, keep the automatically generated pre-restore archive, and restore the last known-good archive.
