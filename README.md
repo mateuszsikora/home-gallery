@@ -53,7 +53,7 @@ A contributor writes to the bot. Their first message creates a pending access re
 
 ![The administration app managing the library, Telegram contributors, playback settings, and the administration password](docs/screenshots/admin-desktop.png)
 
-The upload control visible in the screenshot is always rendered, but the server rejects browser uploads unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`. The administration app [reflows for narrow screens](docs/screenshots/admin-narrow.png), and [the gallery on a portrait screen](docs/screenshots/gallery-narrow.png) shows the blurred-edges fit mode filling the space a landscape photo leaves behind.
+The upload control visible in the screenshot appears only where `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; the default deployment shows a short note in its place. The administration app [reflows for narrow screens](docs/screenshots/admin-narrow.png), and [the gallery on a portrait screen](docs/screenshots/gallery-narrow.png) shows the blurred-edges fit mode filling the space a landscape photo leaves behind.
 
 ## Quick start with Docker Compose
 

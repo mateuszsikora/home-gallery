@@ -77,8 +77,25 @@ describe('administration session routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(adminAuthStatusSchema.parse(response.json())).toEqual({
+      administrationUploadsEnabled: false,
       passwordConfigured: false,
     });
+  });
+
+  it('publishes that administration uploads are enabled when opted in', async () => {
+    await app.close();
+    app = await createApp(
+      createTestConfig(dataDirectory, { allowAdministrationUploads: true }),
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminAuth,
+    });
+
+    expect(
+      adminAuthStatusSchema.parse(response.json()).administrationUploadsEnabled,
+    ).toBe(true);
   });
 
   it('creates an opaque HttpOnly strict session without a password', async () => {
@@ -118,7 +135,10 @@ describe('administration session routes', () => {
       adminAuthStatusSchema.parse(
         (await app.inject({ method: 'GET', url: API_ROUTES.adminAuth })).json(),
       ),
-    ).toEqual({ passwordConfigured: true });
+    ).toEqual({
+      administrationUploadsEnabled: false,
+      passwordConfigured: true,
+    });
 
     const withoutPassword = await createSession();
     const wrongPassword = await createSession({ password: 'not-the-password' });

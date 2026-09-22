@@ -96,6 +96,12 @@ if ! grep -q '"passwordConfigured":false' <<<"$AUTH_STATUS_RESPONSE"; then
   echo "ERROR: A fresh gallery reported a configured password: $AUTH_STATUS_RESPONSE" >&2
   exit 1
 fi
+# The Compose default leaves browser uploads off, and the administration app
+# hides its upload control on the strength of this field alone.
+if ! grep -q '"administrationUploadsEnabled":false' <<<"$AUTH_STATUS_RESPONSE"; then
+  echo "ERROR: The default deployment advertised browser uploads: $AUTH_STATUS_RESPONSE" >&2
+  exit 1
+fi
 
 SESSION_COOKIE_JAR=$TEMP_DIR/admin-session.cookies
 SESSION_STATUS=$(open_admin_session "$SESSION_COOKIE_JAR")
@@ -227,7 +233,9 @@ ADMIN_UPLOAD_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}
   --form 'originalFilename=smoke.png' \
   --form 'source=admin' \
   "http://127.0.0.1:$HOME_GALLERY_API_PORT/api/media")
-if [[ "$ADMIN_UPLOAD_STATUS" != "401" ]]; then
+# 403, never 401: the session is valid, and 401 is what tells the
+# administration app that a session expired.
+if [[ "$ADMIN_UPLOAD_STATUS" != "403" ]]; then
   echo "ERROR: Administration session received $ADMIN_UPLOAD_STATUS from the ingestion-only route." >&2
   exit 1
 fi

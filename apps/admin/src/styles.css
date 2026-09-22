@@ -646,6 +646,18 @@ button:disabled {
   background: var(--sunken);
 }
 
+/* Stands in for the uploader where the server refuses browser uploads, so the
+   panel keeps the same shape instead of simply losing a row. */
+.uploader-note {
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--ink-muted);
+  font-size: var(--fs-md);
+}
+
 .uploader label {
   display: block;
   margin-bottom: var(--sp-1);

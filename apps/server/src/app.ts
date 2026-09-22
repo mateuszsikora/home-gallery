@@ -178,6 +178,7 @@ export const createApp = async (
       startedAt,
     });
     registerAdminSessionRoutes(app, {
+      allowAdministrationUploads: config.allowAdministrationUploads,
       credentials: adminCredentials,
       secureCookie: config.adminSession.secure,
       sessionStore: adminSessionStore,

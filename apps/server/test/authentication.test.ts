@@ -69,6 +69,8 @@ describe('scoped credential guards', () => {
         })
       ).statusCode,
     ).toBe(401);
+    // A session on an ingestion route is refused as well, but with `forbidden`
+    // rather than `unauthorized`, because the session itself is still good.
     expect(
       (
         await app.inject({
@@ -77,7 +79,7 @@ describe('scoped credential guards', () => {
           headers: { cookie: sessionCookie },
         })
       ).statusCode,
-    ).toBe(401);
+    ).toBe(403);
   });
 
   it('accepts a lowercase ingestion scheme', async () => {
@@ -194,6 +196,78 @@ describe('credential rotation and rate limiting', () => {
       });
 
       expect(response.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses a disabled administration upload without spending the sign-in limit', async () => {
+    const app = await createApp(
+      createTestConfig(dataDirectory, {
+        authenticationRateLimit: { max: 2, windowMs: 60_000 },
+      }),
+    );
+    app.get(
+      INGESTION_ROUTE,
+      { onRequest: app.requireIngestionToken },
+      async () => ({ ok: true }),
+    );
+
+    try {
+      const sessionCookie = await createTestAdminSession(app);
+      const disabledUpload = () =>
+        app.inject({
+          method: 'GET',
+          url: INGESTION_ROUTE,
+          headers: { cookie: sessionCookie },
+        });
+
+      const refused = await disabledUpload();
+
+      // 403, so the administration app cannot read it as the expired session
+      // that 401 means there, and no rate limit is consumed, so repeating it
+      // cannot lock the administrator out of signing in again.
+      expect(refused.statusCode).toBe(403);
+      expect(apiErrorBodySchema.parse(refused.json()).error.code).toBe(
+        'forbidden',
+      );
+      expect((await disabledUpload()).statusCode).toBe(403);
+      expect((await disabledUpload()).statusCode).toBe(403);
+      expect(await createTestAdminSession(app)).toContain('=');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('still bounds ingestion token guesses that carry a valid session', async () => {
+    const app = await createApp(
+      createTestConfig(dataDirectory, {
+        authenticationRateLimit: { max: 2, windowMs: 60_000 },
+      }),
+    );
+    app.get(
+      INGESTION_ROUTE,
+      { onRequest: app.requireIngestionToken },
+      async () => ({ ok: true }),
+    );
+
+    try {
+      const sessionCookie = await createTestAdminSession(app);
+      // A session cookie must not buy unlimited guesses at the ingestion
+      // token: a wrong bearer is a failed credential whatever accompanies it.
+      const guess = (attempt: number) =>
+        app.inject({
+          method: 'GET',
+          url: INGESTION_ROUTE,
+          headers: {
+            authorization: `Bearer wrong-token-${attempt}`,
+            cookie: sessionCookie,
+          },
+        });
+
+      expect((await guess(1)).statusCode).toBe(401);
+      expect((await guess(2)).statusCode).toBe(401);
+      expect((await guess(3)).statusCode).toBe(429);
     } finally {
       await app.close();
     }

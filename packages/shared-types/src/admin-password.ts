@@ -34,9 +34,19 @@ const submittedPasswordSchema = z
   .min(1)
   .max(MAX_ADMIN_PASSWORD_LENGTH);
 
-/** Public state that tells the administration app which login screen to show. */
+/**
+ * Public state the administration app reads before it renders: which sign-in
+ * screen to show, and which controls the deployment actually accepts.
+ */
 export const adminAuthStatusSchema = z
   .object({
+    /**
+     * Whether an administration session may reach the ingestion-only upload
+     * route. Published so the studio can hide a control the server refuses.
+     * Defaulted, so a newer application reading an older server that does not
+     * publish it yet hides the control rather than failing to open at all.
+     */
+    administrationUploadsEnabled: z.boolean().default(false),
     passwordConfigured: z.boolean(),
   })
   .strict();

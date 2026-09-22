@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HomeGalleryApiError } from '@home-gallery/api-client';
 import type {
+  AdminAuthStatus,
   GallerySettings,
   MediaRecord,
   TelegramContributor,
@@ -74,6 +75,14 @@ const settings: GallerySettings = {
   imageFit: 'blur',
 };
 
+const authStatus = (
+  overrides: Partial<AdminAuthStatus> = {},
+): AdminAuthStatus => ({
+  administrationUploadsEnabled: true,
+  passwordConfigured: false,
+  ...overrides,
+});
+
 interface ClientMocks {
   readonly client: AdminClient;
   readonly createAdminSession: ReturnType<typeof vi.fn>;
@@ -105,9 +114,9 @@ const createClientMocks = (
   const getAdminSession = vi.fn().mockRejectedValue(unauthorized);
   const deleteAdminSession = vi.fn().mockResolvedValue(undefined);
   // A fresh installation has no password, which is the documented default.
-  const getAdminAuthStatus = vi
-    .fn()
-    .mockResolvedValue({ passwordConfigured: false });
+  // Uploads are opted in here so the library tests reach the control; the
+  // deployment default is covered by its own test.
+  const getAdminAuthStatus = vi.fn().mockResolvedValue(authStatus());
   const setAdminPassword = vi.fn().mockResolvedValue(undefined);
   const removeAdminPassword = vi.fn().mockResolvedValue(undefined);
   const listMedia = vi.fn().mockResolvedValue({ items, nextCursor: null });
@@ -215,7 +224,9 @@ describe('AdminApp', () => {
   it('asks for the password only when one is configured', async () => {
     const user = userEvent.setup();
     const mocks = createClientMocks([]);
-    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
+    mocks.getAdminAuthStatus.mockResolvedValue(
+      authStatus({ passwordConfigured: true }),
+    );
 
     render(
       <AdminApp
@@ -246,7 +257,9 @@ describe('AdminApp', () => {
       error: { code: 'unauthorized', message: 'Wrong password' },
     });
     const mocks = createClientMocks([]);
-    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
+    mocks.getAdminAuthStatus.mockResolvedValue(
+      authStatus({ passwordConfigured: true }),
+    );
     mocks.createAdminSession.mockRejectedValue(unauthorized);
 
     render(
@@ -327,7 +340,9 @@ describe('AdminApp', () => {
   it('reports a wrong current password without ending the session', async () => {
     const user = userEvent.setup();
     const mocks = createClientMocks([]);
-    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
+    mocks.getAdminAuthStatus.mockResolvedValue(
+      authStatus({ passwordConfigured: true }),
+    );
     mocks.getAdminSession.mockResolvedValue({
       expiresAt: '2026-08-02T12:00:00.000Z',
     });
@@ -365,7 +380,9 @@ describe('AdminApp', () => {
   it('removes the password and warns that the panel reopened', async () => {
     const user = userEvent.setup();
     const mocks = createClientMocks([]);
-    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
+    mocks.getAdminAuthStatus.mockResolvedValue(
+      authStatus({ passwordConfigured: true }),
+    );
     mocks.getAdminSession.mockResolvedValue({
       expiresAt: '2026-08-02T12:00:00.000Z',
     });
@@ -486,6 +503,59 @@ describe('AdminApp', () => {
       ),
     ).toBeVisible();
     expect(screen.getByRole('heading', { name: 'summer.jpg' })).toBeVisible();
+  });
+
+  it('replaces the uploader with an explanation when the server refuses browser uploads', async () => {
+    const mocks = createClientMocks([]);
+    mocks.getAdminAuthStatus.mockResolvedValue(
+      authStatus({ administrationUploadsEnabled: false }),
+    );
+    await openStudio(mocks.client);
+
+    expect(screen.queryByLabelText('Add a photograph')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Upload photo' })).toBeNull();
+    expect(
+      screen.getByText(/Browser uploads are disabled on this server/),
+    ).toBeVisible();
+    // The empty library must not suggest the upload that was just withdrawn.
+    expect(
+      screen.getByText('Approve a Telegram contributor to fill the rotation.'),
+    ).toBeVisible();
+    expect(mocks.uploadMedia).not.toHaveBeenCalled();
+  });
+
+  it('withdraws the uploader instead of signing out when the server refuses an upload', async () => {
+    const mocks = createClientMocks([]);
+    mocks.uploadMedia.mockRejectedValueOnce(
+      new HomeGalleryApiError(403, 'Refused', {
+        error: {
+          code: 'forbidden',
+          message:
+            'This server does not accept ingestion from an administration session',
+        },
+      }),
+    );
+    await openStudio(mocks.client);
+
+    const uploadInput = screen.getByLabelText('Add a photograph');
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [new File(['image bytes'], 'new-frame.jpg')],
+      },
+    });
+    const uploadForm = uploadInput.closest('form');
+
+    if (uploadForm === null) {
+      throw new Error('Upload form was not rendered');
+    }
+
+    fireEvent.submit(uploadForm);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Browser uploads are disabled on this server.',
+    );
+    expect(screen.getByRole('heading', { name: 'Library' })).toBeVisible();
+    expect(screen.queryByLabelText('Add a photograph')).toBeNull();
   });
 
   it('changes visibility and reorders media deterministically', async () => {

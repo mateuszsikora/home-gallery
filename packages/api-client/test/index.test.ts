@@ -125,7 +125,10 @@ describe('createHomeGalleryClient', () => {
       requests.push(init);
 
       return String(input).endsWith('/api/admin/auth')
-        ? jsonResponse({ passwordConfigured: false })
+        ? jsonResponse({
+            administrationUploadsEnabled: false,
+            passwordConfigured: false,
+          })
         : jsonResponse({ expiresAt: '2026-08-02T12:00:00.000Z' }, 201);
     };
     const client = createHomeGalleryClient({
@@ -135,6 +138,7 @@ describe('createHomeGalleryClient', () => {
     });
 
     expect(await client.getAdminAuthStatus()).toEqual({
+      administrationUploadsEnabled: false,
       passwordConfigured: false,
     });
 
