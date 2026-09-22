@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose behavior this project does not have yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Home Gallery is a photo frame for a trusted home network, with the scope written down in [docs/SPECIFICATION.md](https://github.com/mateuszsikora/home-gallery/blob/main/docs/SPECIFICATION.md). A request that turns it into a general-purpose photo host, a multi-tenant service, or an internet-facing gallery is likely to be declined.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and where the current behavior gets in the way. Describe the situation rather than the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Existing settings, a workaround, or another tool, and why each one falls short.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I read the specification and believe this fits a self-hosted photo frame on a trusted network.
+          required: true
