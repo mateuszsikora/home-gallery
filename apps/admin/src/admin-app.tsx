@@ -12,6 +12,19 @@ import {
   createHomeGalleryClient,
   type HomeGalleryClient,
 } from '@home-gallery/api-client';
+
+import {
+  AlertIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  ImageIcon,
+  ShieldIcon,
+  SignOutIcon,
+  TrashIcon,
+  UploadIcon,
+  UsersIcon,
+} from './icons.js';
 import type {
   GallerySettings,
   ImageFit,
@@ -205,8 +218,17 @@ const mediaAttribution = (media: MediaRecord): string => {
     return `Telegram user ${media.sourceId}`;
   }
 
-  return media.source === 'admin' ? 'Administration upload' : 'API upload';
+  return media.source === 'admin' ? 'Admin upload' : 'API upload';
 };
+
+/** Two letters are enough to tell contributor rows apart at a glance. */
+const contributorInitials = (name: string): string =>
+  name
+    .replace(/^@/, '')
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join('');
 
 interface StatusMessageProps {
   readonly error: string | undefined;
@@ -222,12 +244,12 @@ const StatusMessage = ({
   if (error !== undefined) {
     return (
       <div
-        className="message message--error"
+        className="banner banner--error"
         ref={errorRef}
         role="alert"
         tabIndex={-1}
       >
-        <span aria-hidden="true">!</span>
+        <AlertIcon />
         <p>{error}</p>
       </div>
     );
@@ -235,8 +257,8 @@ const StatusMessage = ({
 
   if (notice !== undefined) {
     return (
-      <div className="message message--success" role="status">
-        <span aria-hidden="true">✓</span>
+      <div className="banner banner--success" role="status">
+        <CheckIcon />
         <p>{notice}</p>
       </div>
     );
@@ -256,6 +278,7 @@ export const AdminApp = ({
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>();
   const [busyAction, setBusyAction] = useState<string>();
   const [deleteCandidate, setDeleteCandidate] = useState<string>();
+  const [selectedFileName, setSelectedFileName] = useState<string>();
   const [previewFailures, setPreviewFailures] = useState<Set<string>>(
     () => new Set(),
   );
@@ -338,6 +361,7 @@ export const AdminApp = ({
     setSettingsDraft(undefined);
     setBusyAction(undefined);
     setDeleteCandidate(undefined);
+    setSelectedFileName(undefined);
     setPhase('signed-out');
     setError(message);
     setNotice(undefined);
@@ -395,7 +419,7 @@ export const AdminApp = ({
       if (isUnauthorized(reason)) {
         signOut();
       } else {
-        setError(`The studio could not be locked. ${errorDetail(reason)}`);
+        setError(`Signing out failed. ${errorDetail(reason)}`);
         setBusyAction(undefined);
       }
     }
@@ -435,6 +459,7 @@ export const AdminApp = ({
         ]),
       );
       form.reset();
+      setSelectedFileName(undefined);
       setNotice(`${file.name} was uploaded and added to the gallery.`);
     } catch (reason) {
       handleActionFailure(reason, 'The image could not be uploaded.');
@@ -639,45 +664,49 @@ export const AdminApp = ({
 
   if (phase === 'signed-out') {
     return (
-      <main className="login-shell">
-        <section aria-labelledby="login-title" className="login-card">
-          <div className="brand-mark" aria-hidden="true">
+      <main className="auth">
+        <section aria-labelledby="login-title" className="auth__card">
+          <span className="brand-mark" aria-hidden="true">
             HG
-          </div>
-          <p className="eyebrow">Home Gallery / Admin</p>
-          <h1 id="login-title">Your walls, in your hands.</h1>
-          <p className="login-card__intro">
-            Enter the private API access token to start a short-lived studio
-            session. The token itself is never stored by the browser.
+          </span>
+          <h1 id="login-title">Home Gallery admin</h1>
+          <p className="auth__intro">
+            Enter the administration access token to start a short-lived
+            session.
           </p>
           <StatusMessage error={error} errorRef={errorRef} notice={notice} />
           <form
-            className="login-form"
+            className="auth__form field"
             onSubmit={(event) => void authenticate(event)}
           >
-            <label htmlFor="access-token">Access token</label>
-            <div className="login-form__row">
-              <input
-                autoComplete="off"
-                autoFocus
-                id="access-token"
-                name="accessToken"
-                onChange={(event) => {
-                  setTokenInput(event.currentTarget.value);
-                }}
-                placeholder="Paste your token"
-                required
-                type="password"
-                value={tokenInput}
-              />
-              <button className="button button--primary" type="submit">
-                Open studio
-              </button>
-            </div>
+            <label className="field__label" htmlFor="access-token">
+              Access token
+            </label>
+            <input
+              autoComplete="off"
+              autoFocus
+              className="text-input"
+              id="access-token"
+              name="accessToken"
+              onChange={(event) => {
+                setTokenInput(event.currentTarget.value);
+              }}
+              placeholder="Paste your token"
+              required
+              type="password"
+              value={tokenInput}
+            />
+            <button
+              className="button button--primary button--block"
+              type="submit"
+            >
+              Sign in
+            </button>
           </form>
-          <p className="security-note">
-            <span aria-hidden="true">●</span> The server replaces the token with
-            an HttpOnly session cookie that application code cannot read.
+          <p className="auth__note">
+            <ShieldIcon />
+            The browser never stores the token. The server exchanges it for an
+            HttpOnly session cookie that page scripts cannot read.
           </p>
         </section>
       </main>
@@ -690,11 +719,9 @@ export const AdminApp = ({
     client === undefined
   ) {
     return (
-      <main className="loading-shell" aria-busy="true">
-        <div className="brand-mark" aria-hidden="true">
-          HG
-        </div>
-        <p role="status">Opening your gallery studio…</p>
+      <main className="loading" aria-busy="true">
+        <span className="spinner" aria-hidden="true" />
+        <p role="status">Loading the admin panel…</p>
       </main>
     );
   }
@@ -705,165 +732,173 @@ export const AdminApp = ({
   ).length;
 
   return (
-    <div className="admin-shell">
-      <header className="site-header">
-        <a
-          className="brand"
-          href="#top"
-          aria-label="Home Gallery administration"
-        >
-          <span className="brand-mark" aria-hidden="true">
-            HG
-          </span>
-          <span>
-            Home Gallery
-            <small>Administration</small>
-          </span>
-        </a>
-        <button
-          className="button button--quiet"
-          disabled={actionInProgress}
-          onClick={() => {
-            void endSession();
-          }}
-          type="button"
-        >
-          Lock studio
-        </button>
+    <div className="app">
+      <header className="topbar">
+        <div className="topbar__inner">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              HG
+            </span>
+            <h1>
+              Home Gallery <span>Administration</span>
+            </h1>
+          </div>
+          <button
+            className="button button--secondary"
+            disabled={actionInProgress}
+            onClick={() => {
+              void endSession();
+            }}
+            type="button"
+          >
+            <SignOutIcon />
+            Sign out
+          </button>
+        </div>
       </header>
 
-      <main id="top">
-        <section className="hero" aria-labelledby="page-title">
-          <div>
-            <p className="eyebrow">Collection control</p>
-            <h1 id="page-title">Make the room feel alive.</h1>
-          </div>
-          <p>
-            Shape the sequence, choose what appears, and keep every transition
-            feeling effortless.
-          </p>
-        </section>
-
+      <main className="page">
         <StatusMessage error={error} errorRef={errorRef} notice={notice} />
 
-        <div className="dashboard-grid">
-          <section
-            aria-labelledby="library-title"
-            className="panel panel--library"
-          >
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">01 / Library</p>
-                <h2 id="library-title">Photos on rotation</h2>
+        <div className="layout">
+          <div className="layout__main">
+            <section aria-labelledby="library-title" className="panel">
+              <div className="panel__header">
+                <div>
+                  <h2 id="library-title">Library</h2>
+                  <p className="panel__hint">
+                    Photos in rotation, in playback order.
+                  </p>
+                </div>
+                <span className="badge">
+                  {media.length} {media.length === 1 ? 'photo' : 'photos'}
+                </span>
               </div>
-              <span className="count-badge">
-                {media.length} {media.length === 1 ? 'photo' : 'photos'}
-              </span>
-            </div>
 
-            <form
-              className="upload-bar"
-              onSubmit={(event) => void uploadMedia(event)}
-            >
-              <div>
-                <label htmlFor="media-upload">Add a photograph</label>
-                <p>JPEG, PNG, WebP, HEIC or HEIF</p>
-              </div>
-              <input
-                accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
-                id="media-upload"
-                name="media"
-                ref={uploadInputRef}
-                required
-                type="file"
-              />
-              <button
-                className="button button--primary"
-                disabled={actionInProgress}
-                type="submit"
-              >
-                {busyAction === 'upload' ? 'Uploading…' : 'Upload photo'}
-              </button>
-            </form>
-
-            {media.length === 0 ? (
-              <div className="empty-state">
-                <span aria-hidden="true">□</span>
-                <h3>The first frame is waiting.</h3>
-                <p>Upload a photograph to begin your gallery rotation.</p>
-              </div>
-            ) : (
-              <ol className="media-list" aria-label="Gallery order">
-                {media.map((item, index) => {
-                  const previewFailed = previewFailures.has(item.id);
-                  const deleting = deleteCandidate === item.id;
-
-                  return (
-                    <li key={item.id}>
-                      <article
-                        className={`media-card${item.enabled ? '' : ' media-card--disabled'}`}
+              <div className="panel__body">
+                <form
+                  className="uploader"
+                  onSubmit={(event) => void uploadMedia(event)}
+                >
+                  <div className="uploader__field">
+                    <label htmlFor="media-upload">Add a photograph</label>
+                    {/*
+                     * The native file control is replaced by a button that
+                     * forwards the click, so the row matches the rest of the
+                     * panel. Validation stays in `uploadMedia`, because a
+                     * visually hidden `required` input cannot be focused to
+                     * show the browser's own message.
+                     */}
+                    <div className="file-picker">
+                      <button
+                        className="button button--secondary"
+                        disabled={actionInProgress}
+                        onClick={() => uploadInputRef.current?.click()}
+                        type="button"
                       >
-                        <div className="media-card__preview">
-                          {previewFailed ? (
-                            <span>Preview unavailable</span>
-                          ) : (
-                            <img
-                              alt={`Preview of ${item.originalFilename}`}
-                              height={item.height}
-                              loading="lazy"
-                              onError={() => {
-                                setPreviewFailures((failures) =>
-                                  new Set(failures).add(item.id),
-                                );
-                              }}
-                              src={client.getMediaContentUrl(item.id)}
-                              width={item.width}
-                            />
-                          )}
-                          <span className="order-number" aria-hidden="true">
-                            {String(index + 1).padStart(2, '0')}
-                          </span>
-                          {!item.enabled ? (
-                            <span className="visibility-label">Hidden</span>
-                          ) : null}
-                        </div>
+                        Choose file
+                      </button>
+                      <span className="file-picker__name" id="upload-hint">
+                        {selectedFileName ?? 'JPEG, PNG, WebP, HEIC or HEIF'}
+                      </span>
+                    </div>
+                    <input
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+                      aria-describedby="upload-hint"
+                      className="sr-only"
+                      id="media-upload"
+                      name="media"
+                      onChange={(event) => {
+                        setSelectedFileName(
+                          event.currentTarget.files?.[0]?.name,
+                        );
+                      }}
+                      ref={uploadInputRef}
+                      tabIndex={-1}
+                      type="file"
+                    />
+                  </div>
+                  <button
+                    className="button button--primary"
+                    disabled={actionInProgress}
+                    type="submit"
+                  >
+                    <UploadIcon />
+                    {busyAction === 'upload' ? 'Uploading…' : 'Upload photo'}
+                  </button>
+                </form>
 
-                        <div className="media-card__body">
-                          <div className="media-card__title-row">
-                            <div>
-                              <h3>{item.originalFilename}</h3>
-                              <p>{mediaAttribution(item)}</p>
-                            </div>
-                            <button
-                              aria-pressed={item.enabled}
-                              className={`toggle${item.enabled ? ' toggle--active' : ''}`}
-                              disabled={actionInProgress}
-                              onClick={() => void toggleMedia(item)}
-                              type="button"
-                            >
-                              <span aria-hidden="true" />
-                              {item.enabled ? 'Visible' : 'Hidden'}
-                            </button>
-                          </div>
+                {media.length === 0 ? (
+                  <div className="empty">
+                    <ImageIcon />
+                    <h3>No photos yet</h3>
+                    <p>
+                      Upload a photograph or approve a Telegram contributor to
+                      fill the rotation.
+                    </p>
+                  </div>
+                ) : (
+                  <ol className="media-list" aria-label="Gallery order">
+                    {media.map((item, index) => {
+                      const previewFailed = previewFailures.has(item.id);
+                      const deleting = deleteCandidate === item.id;
+                      const busyDeleting = busyAction === `delete:${item.id}`;
 
-                          <dl className="metadata">
-                            <div>
-                              <dt>Added</dt>
-                              <dd>{formatTimestamp(item.uploadedAt)}</dd>
+                      return (
+                        <li key={item.id}>
+                          <article
+                            className={`media${item.enabled ? '' : ' media--hidden'}`}
+                          >
+                            <div className="media__thumb">
+                              {previewFailed ? (
+                                <span className="media__fallback">
+                                  <ImageIcon />
+                                </span>
+                              ) : (
+                                <img
+                                  alt={`Preview of ${item.originalFilename}`}
+                                  height={item.height}
+                                  loading="lazy"
+                                  onError={() => {
+                                    setPreviewFailures((failures) =>
+                                      new Set(failures).add(item.id),
+                                    );
+                                  }}
+                                  src={client.getMediaContentUrl(item.id)}
+                                  width={item.width}
+                                />
+                              )}
+                              <span className="media__index" aria-hidden="true">
+                                {index + 1}
+                              </span>
                             </div>
-                            <div>
-                              <dt>Frame</dt>
-                              <dd>
+
+                            <div className="media__main">
+                              <h3 className="media__name">
+                                {item.originalFilename}
+                              </h3>
+                              <p className="media__facts">
+                                {mediaAttribution(item)} ·{' '}
+                                {formatTimestamp(item.uploadedAt)} ·{' '}
                                 {item.width} × {item.height}
-                              </dd>
+                              </p>
                             </div>
-                          </dl>
 
-                          <div className="media-card__actions">
-                            <div
-                              className="reorder-actions"
-                              aria-label={`Reorder ${item.originalFilename}`}
-                            >
+                            <div className="media__controls">
+                              <button
+                                aria-pressed={item.enabled}
+                                className={`switch${item.enabled ? ' switch--on' : ''}`}
+                                disabled={actionInProgress}
+                                onClick={() => void toggleMedia(item)}
+                                type="button"
+                              >
+                                <span
+                                  className="switch__track"
+                                  aria-hidden="true"
+                                />
+                                {item.enabled ? 'Visible' : 'Hidden'}
+                              </button>
+                              <span className="divider" aria-hidden="true" />
                               <button
                                 aria-label={`Move ${item.originalFilename} up`}
                                 className="icon-button"
@@ -871,7 +906,7 @@ export const AdminApp = ({
                                 onClick={() => void moveMedia(item, -1)}
                                 type="button"
                               >
-                                ↑
+                                <ChevronUpIcon />
                               </button>
                               <button
                                 aria-label={`Move ${item.originalFilename} down`}
@@ -882,144 +917,259 @@ export const AdminApp = ({
                                 onClick={() => void moveMedia(item, 1)}
                                 type="button"
                               >
-                                ↓
+                                <ChevronDownIcon />
+                              </button>
+                              <button
+                                aria-label={`Delete ${item.originalFilename}`}
+                                className="icon-button icon-button--danger"
+                                disabled={actionInProgress}
+                                onClick={() => {
+                                  clearMessages();
+                                  setDeleteCandidate(item.id);
+                                }}
+                                type="button"
+                              >
+                                <TrashIcon />
                               </button>
                             </div>
-                            <button
-                              className="button button--danger-link"
-                              disabled={actionInProgress}
-                              onClick={() => {
-                                clearMessages();
-                                setDeleteCandidate(item.id);
-                              }}
-                              type="button"
-                            >
-                              Delete
-                            </button>
-                          </div>
 
-                          {deleting ? (
-                            <div
-                              aria-labelledby={`delete-title-${item.id}`}
-                              aria-modal="false"
-                              className="delete-confirmation"
-                              role="alertdialog"
-                            >
+                            {deleting ? (
+                              <div
+                                aria-labelledby={`delete-title-${item.id}`}
+                                aria-modal="false"
+                                className="confirm"
+                                role="alertdialog"
+                              >
+                                <div>
+                                  <strong id={`delete-title-${item.id}`}>
+                                    Delete this photo?
+                                  </strong>
+                                  <p>
+                                    The image file is removed permanently and
+                                    cannot be restored.
+                                  </p>
+                                </div>
+                                <div className="confirm__actions">
+                                  <button
+                                    className="button button--secondary"
+                                    disabled={busyDeleting}
+                                    onClick={() => {
+                                      setDeleteCandidate(undefined);
+                                    }}
+                                    type="button"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    className="button button--danger"
+                                    disabled={busyDeleting}
+                                    onClick={() => void deleteMedia(item)}
+                                    ref={confirmDeleteRef}
+                                    type="button"
+                                  >
+                                    {busyDeleting
+                                      ? 'Deleting…'
+                                      : 'Delete photo'}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </article>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </div>
+            </section>
+
+            <section aria-labelledby="contributors-title" className="panel">
+              <div className="panel__header">
+                <div>
+                  <h2 id="contributors-title">Contributors</h2>
+                  <p className="panel__hint">
+                    Telegram users who may send photos to the gallery.
+                  </p>
+                </div>
+                <span
+                  className={`badge${pendingContributors > 0 ? ' badge--attention' : ''}`}
+                >
+                  {pendingContributors} waiting
+                </span>
+              </div>
+
+              <div className="panel__body">
+                {contributors.length === 0 ? (
+                  <div className="empty">
+                    <UsersIcon />
+                    <h3>No access requests</h3>
+                    <p>
+                      A Telegram user appears here the first time they write to
+                      the bot. Nothing they send is stored before you approve
+                      them.
+                    </p>
+                  </div>
+                ) : (
+                  <ul className="contributor-list">
+                    {contributors.map((contributor) => {
+                      const name = contributorName(contributor);
+                      const deciding =
+                        busyAction ===
+                        `contributor:${contributor.telegramUserId}`;
+
+                      return (
+                        <li key={contributor.telegramUserId}>
+                          <article
+                            className={`contributor contributor--${contributor.status}`}
+                          >
+                            <div className="contributor__identity">
+                              <span
+                                className="contributor__avatar"
+                                aria-hidden="true"
+                              >
+                                {contributorInitials(name)}
+                              </span>
                               <div>
-                                <strong id={`delete-title-${item.id}`}>
-                                  Delete permanently?
-                                </strong>
-                                <p>
-                                  This removes the image file and cannot be
-                                  undone.
+                                <h3 className="contributor__name">{name}</h3>
+                                <p className="contributor__meta">
+                                  {contributor.username === undefined
+                                    ? null
+                                    : `@${contributor.username} · `}
+                                  Telegram ID {contributor.telegramUserId} ·
+                                  Requested{' '}
+                                  {formatTimestamp(contributor.requestedAt)}
                                 </p>
                               </div>
-                              <div>
-                                <button
-                                  className="button button--quiet"
-                                  disabled={busyAction === `delete:${item.id}`}
-                                  onClick={() => {
-                                    setDeleteCandidate(undefined);
-                                  }}
-                                  type="button"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  className="button button--danger"
-                                  disabled={busyAction === `delete:${item.id}`}
-                                  onClick={() => void deleteMedia(item)}
-                                  ref={confirmDeleteRef}
-                                  type="button"
-                                >
-                                  {busyAction === `delete:${item.id}`
-                                    ? 'Deleting…'
-                                    : 'Delete photo'}
-                                </button>
-                              </div>
                             </div>
-                          ) : null}
-                        </div>
-                      </article>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </section>
+
+                            <div className="contributor__actions">
+                              <span
+                                className={`pill pill--${contributor.status}`}
+                              >
+                                {CONTRIBUTOR_STATUS_LABEL[contributor.status]}
+                              </span>
+                              {contributor.status === 'approved' ? null : (
+                                <button
+                                  aria-label={`Approve ${name}`}
+                                  className="button button--primary"
+                                  disabled={actionInProgress}
+                                  onClick={() =>
+                                    void decideContributor(
+                                      contributor,
+                                      'approved',
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  {deciding ? 'Saving…' : 'Approve'}
+                                </button>
+                              )}
+                              {contributor.status === 'rejected' ? null : (
+                                <button
+                                  aria-label={`Reject ${name}`}
+                                  className="button button--quiet"
+                                  disabled={actionInProgress}
+                                  onClick={() =>
+                                    void decideContributor(
+                                      contributor,
+                                      'rejected',
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  Reject
+                                </button>
+                              )}
+                            </div>
+                          </article>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </section>
+          </div>
 
           <aside
-            className="panel panel--settings"
+            className="panel layout__side"
             aria-labelledby="settings-title"
           >
-            <div className="section-heading section-heading--stacked">
-              <p className="eyebrow">02 / Playback</p>
-              <h2 id="settings-title">Set the rhythm</h2>
-              <p>Changes reach the fullscreen gallery on its next refresh.</p>
+            <div className="panel__header">
+              <div>
+                <h2 id="settings-title">Playback</h2>
+                <p className="panel__hint">
+                  Applied when the gallery next refreshes.
+                </p>
+              </div>
             </div>
             <form
-              className="settings-form"
+              className="settings"
               onSubmit={(event) => void saveSettings(event)}
             >
-              <label htmlFor="slide-duration">
-                <span>Time per photo</span>
-                <small>1 second to 60 minutes</small>
-              </label>
-              <div className="number-field">
-                <input
-                  id="slide-duration"
-                  max="3600"
-                  min="1"
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setSettingsDraft((draft) =>
-                      draft === undefined
-                        ? draft
-                        : {
-                            ...draft,
-                            slideDurationSeconds: value,
-                          },
-                    );
-                  }}
-                  required
-                  step="0.1"
-                  type="number"
-                  value={settingsDraft.slideDurationSeconds}
-                />
-                <span>seconds</span>
+              <div className="field">
+                <label className="field__label" htmlFor="slide-duration">
+                  <span>Time per photo</span>
+                  <small>1 second to 60 minutes</small>
+                </label>
+                <div className="input-group">
+                  <input
+                    id="slide-duration"
+                    max="3600"
+                    min="1"
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setSettingsDraft((draft) =>
+                        draft === undefined
+                          ? draft
+                          : {
+                              ...draft,
+                              slideDurationSeconds: value,
+                            },
+                      );
+                    }}
+                    required
+                    step="0.1"
+                    type="number"
+                    value={settingsDraft.slideDurationSeconds}
+                  />
+                  <span>seconds</span>
+                </div>
               </div>
 
-              <label htmlFor="fade-duration">
-                <span>Fade duration</span>
-                <small>0 to 10 seconds</small>
-              </label>
-              <div className="number-field">
-                <input
-                  id="fade-duration"
-                  max="10"
-                  min="0"
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setSettingsDraft((draft) =>
-                      draft === undefined
-                        ? draft
-                        : {
-                            ...draft,
-                            fadeDurationSeconds: value,
-                          },
-                    );
-                  }}
-                  required
-                  step="0.1"
-                  type="number"
-                  value={settingsDraft.fadeDurationSeconds}
-                />
-                <span>seconds</span>
+              <div className="field">
+                <label className="field__label" htmlFor="fade-duration">
+                  <span>Fade duration</span>
+                  <small>0 to 10 seconds</small>
+                </label>
+                <div className="input-group">
+                  <input
+                    id="fade-duration"
+                    max="10"
+                    min="0"
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setSettingsDraft((draft) =>
+                        draft === undefined
+                          ? draft
+                          : {
+                              ...draft,
+                              fadeDurationSeconds: value,
+                            },
+                      );
+                    }}
+                    required
+                    step="0.1"
+                    type="number"
+                    value={settingsDraft.fadeDurationSeconds}
+                  />
+                  <span>seconds</span>
+                </div>
               </div>
 
-              <fieldset>
+              <fieldset className="choice-group">
                 <legend>Playback order</legend>
-                <label className="radio-card">
+                <label className="choice">
                   <input
                     checked={settingsDraft.playbackMode === 'sequential'}
                     name="playbackMode"
@@ -1038,7 +1188,7 @@ export const AdminApp = ({
                     <small>Repeat the sequence shown here.</small>
                   </span>
                 </label>
-                <label className="radio-card">
+                <label className="choice">
                   <input
                     checked={settingsDraft.playbackMode === 'shuffle'}
                     name="playbackMode"
@@ -1059,10 +1209,10 @@ export const AdminApp = ({
                 </label>
               </fieldset>
 
-              <fieldset>
+              <fieldset className="choice-group">
                 <legend>Photos that do not fit the screen</legend>
                 {IMAGE_FIT_CHOICES.map(({ description, label, value }) => (
-                  <label className="radio-card" key={value}>
+                  <label className="choice" key={value}>
                     <input
                       checked={settingsDraft.imageFit === value}
                       name="imageFit"
@@ -1085,7 +1235,7 @@ export const AdminApp = ({
               </fieldset>
 
               <button
-                className="button button--primary button--full"
+                className="button button--primary button--block"
                 disabled={actionInProgress}
                 type="submit"
               >
@@ -1095,100 +1245,8 @@ export const AdminApp = ({
               </button>
             </form>
           </aside>
-
-          <section
-            aria-labelledby="contributors-title"
-            className="panel panel--contributors"
-          >
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">03 / Contributors</p>
-                <h2 id="contributors-title">Who may send photos</h2>
-              </div>
-              <span className="count-badge">{pendingContributors} waiting</span>
-            </div>
-
-            {contributors.length === 0 ? (
-              <div className="empty-state">
-                <span aria-hidden="true">□</span>
-                <h3>Nobody has asked yet.</h3>
-                <p>
-                  A Telegram user appears here the first time they write to the
-                  bot. Nothing they send is stored before you approve them.
-                </p>
-              </div>
-            ) : (
-              <ul className="contributor-list">
-                {contributors.map((contributor) => {
-                  const name = contributorName(contributor);
-                  const deciding =
-                    busyAction === `contributor:${contributor.telegramUserId}`;
-
-                  return (
-                    <li key={contributor.telegramUserId}>
-                      <article
-                        className={`contributor-card contributor-card--${contributor.status}`}
-                      >
-                        <div className="contributor-card__identity">
-                          <h3>{name}</h3>
-                          <p>
-                            {contributor.username === undefined
-                              ? null
-                              : `@${contributor.username} · `}
-                            Telegram ID {contributor.telegramUserId}
-                          </p>
-                          <p>
-                            Asked {formatTimestamp(contributor.requestedAt)}
-                          </p>
-                        </div>
-
-                        <div className="contributor-card__actions">
-                          <span
-                            className={`status-pill status-pill--${contributor.status}`}
-                          >
-                            {CONTRIBUTOR_STATUS_LABEL[contributor.status]}
-                          </span>
-                          {contributor.status === 'approved' ? null : (
-                            <button
-                              aria-label={`Approve ${name}`}
-                              className="button button--primary"
-                              disabled={actionInProgress}
-                              onClick={() =>
-                                void decideContributor(contributor, 'approved')
-                              }
-                              type="button"
-                            >
-                              {deciding ? 'Saving…' : 'Approve'}
-                            </button>
-                          )}
-                          {contributor.status === 'rejected' ? null : (
-                            <button
-                              aria-label={`Reject ${name}`}
-                              className="button button--danger-link"
-                              disabled={actionInProgress}
-                              onClick={() =>
-                                void decideContributor(contributor, 'rejected')
-                              }
-                              type="button"
-                            >
-                              Reject
-                            </button>
-                          )}
-                        </div>
-                      </article>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
         </div>
       </main>
-
-      <footer>
-        <span>Home Gallery</span>
-        <span>Private by design · Built for the room</span>
-      </footer>
     </div>
   );
 };
