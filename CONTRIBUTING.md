@@ -27,7 +27,7 @@ npm ci
 npm run check
 ```
 
-`npm run check` runs the same checks as the first CI job: `format:check`, `lint`, `typecheck`, `test`, and `build`. CI then runs two deployment checks that `npm run check` does not cover. Changes to the Compose stack, the images, or the deployment scripts need `npm run test:compose`, which exercises upload, restart persistence, backup, and restore in a disposable Compose project. Changes to the TLS profile — `docker-compose.tls.yml`, `docker/Caddyfile`, or the TLS guard in `infra/deploy.sh` — also need `npm run test:tls-config`.
+`npm run check` runs `format:check`, `lint`, `typecheck`, `test`, and `build`. The first CI job runs those same checks, preceded by `npm audit --audit-level=high` against the lockfile — that one is left out of `npm run check` so the local loop stays offline-friendly, and it can fail on a freshly published advisory without any change to the branch. Run it yourself with `npm audit --audit-level=high` if CI flags it. CI then runs two deployment checks that `npm run check` does not cover. Changes to the Compose stack, the images, or the deployment scripts need `npm run test:compose`, which exercises upload, restart persistence, backup, and restore in a disposable Compose project. Changes to the TLS profile — `docker-compose.tls.yml`, `docker/Caddyfile`, or the TLS guard in `infra/deploy.sh` — also need `npm run test:tls-config`.
 
 A pull request should:
 
