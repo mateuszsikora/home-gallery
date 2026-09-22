@@ -6,7 +6,7 @@ The project is under active development. The product requirements are in [docs/S
 
 The MVP HTTP routes and representative payloads are documented in [docs/API.md](docs/API.md).
 
-Production images, Docker Compose deployment, backup and restore, rollback, and the Tailscale/SSH delivery workflow are documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Production images, Docker Compose deployment, backup and restore, and rollback are documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Project status
 
@@ -115,7 +115,7 @@ Each application will remain independently deployable and communicate through pu
 
 ## Deployment target
 
-The MVP runs on a LAN server that may already host unrelated stacks, so Home Gallery stays self-contained: it uses its own Compose project, configuration directory, secrets, ports, containers, network, and persistent data, and never addresses another project's resources. Delivery uses a private GHCR registry and a Tailscale/SSH workflow.
+The MVP runs on a LAN server that may already host unrelated stacks, so Home Gallery stays self-contained: it uses its own Compose project, configuration directory, secrets, ports, containers, network, and persistent data, and never addresses another project's resources. Images are published to GHCR by CI and deployed to the host by an operator.
 
 From a configured production checkout, validate and start the isolated stack with:
 

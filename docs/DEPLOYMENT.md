@@ -232,7 +232,7 @@ The smoke test also verifies session creation, cookie-authenticated reads, CSRF 
 
 ## Upgrade and rollback
 
-The default-branch workflow publishes `latest` and immutable `sha-<12-character-commit>` tags. Automated deployment writes the matching immutable tag to the host before calling `deploy.sh`.
+The default-branch workflow publishes `latest` and immutable `sha-<12-character-commit>` tags. Pin the tag you want in the host `.env` before calling `deploy.sh`.
 
 For a manual upgrade:
 
@@ -253,34 +253,16 @@ bash deploy.sh
 
 Always take a backup before upgrading. A future release may include a database migration that older application code cannot read. In that case, restore the backup made immediately before the upgrade as well as pinning the older image tag.
 
-## Automated deployment
+## Continuous integration
 
 On every successful push to `main`, CI:
 
 1. runs formatting, linting, type checking, unit tests, builds, and the Compose smoke test;
-2. publishes the four private GHCR images for `linux/amd64` as `latest` and `sha-*`;
-3. connects an ephemeral `tag:ci` Tailscale node;
-4. discovers the remote user's home directory over SSH;
-5. rsyncs only Home Gallery infrastructure files into `$HOME/home-gallery/infra`;
-6. writes runtime secrets to the host `.env` with mode `600`;
-7. logs the host into GHCR with the job-scoped token and runs `deploy.sh`.
+2. publishes the four GHCR images for `linux/amd64` as `latest` and `sha-*`.
 
-Configure these repository or production-environment secrets:
+Image publishing uses the job-scoped `GITHUB_TOKEN`, so it needs no additional secrets.
 
-- `TS_OAUTH_CLIENT_ID`;
-- `TS_OAUTH_SECRET`;
-- `DEPLOY_HOST`;
-- `DEV_SSH_USER`;
-- `DEPLOY_SSH_KEY`;
-- `ADMIN_TOKEN`;
-- `INGESTION_TOKEN`;
-- `TELEGRAM_BOT_TOKEN`.
-
-Optional previous-token secrets `ADMIN_TOKEN_PREVIOUS` and `INGESTION_TOKEN_PREVIOUS` support the documented overlap window. Optional Actions variables configure ports, limits, proxy trust, administration uploads, and session lifetime/capacity using the matching `.env.example` names. The workflow writes `HOME_GALLERY_ADMIN_SESSION_SECURE=false` for the base profile, and the TLS Compose override forces it to `true` when TLS is enabled.
-
-To enable automated TLS deployment, set `HOME_GALLERY_TLS_ENABLED=true`, `HOME_GALLERY_HTTP_BIND_ADDRESS=127.0.0.1`, `HOME_GALLERY_TLS_GALLERY_HOST`, and `HOME_GALLERY_TLS_ADMIN_HOST` as Actions variables. Optional `HOME_GALLERY_TLS_HTTP_PORT` and `HOME_GALLERY_TLS_HTTPS_PORT` variables override ports 80 and 443. Use a dedicated Tailscale ACL grant for the CI tag and restrict the SSH key to the deployment host.
-
-The deployment concurrency group is Home Gallery-specific and does not cancel an in-progress deployment. Failures print Compose state and recent logs for all four services.
+CI does not deliver those images to a host. Deployment is a separate, operator-driven step: pull the chosen tag on the deployment host and run `deploy.sh` as described in [First installation](#first-installation) and [Upgrade and rollback](#upgrade-and-rollback).
 
 ## Capacity and routine operations
 
