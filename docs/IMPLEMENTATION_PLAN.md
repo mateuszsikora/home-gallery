@@ -105,8 +105,7 @@ The matching GitHub issues are the source of truth for execution state. This doc
 
 The first production target is an existing LAN server that already runs unrelated Compose projects. The established deployment pattern on that host is:
 
-- Linux `amd64` images are built by GitHub Actions and published to private GHCR packages;
-- after a default-branch merge, GitHub Actions connects through Tailscale and transfers infrastructure files over SSH/rsync;
+- Linux `amd64` images are built by GitHub Actions and published as public GHCR packages;
 - an on-host deploy script pulls immutable `sha-*` or `latest` image tags, runs Docker Compose, and verifies health checks;
 - on-host secrets are created with restrictive permissions and are never committed;
 - each project owns a prefixed directory under `$HOME`, prefixed Compose project and container names, its own network and volumes, and a distinct host port range.
