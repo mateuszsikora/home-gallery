@@ -1,48 +1,134 @@
 # Home Gallery
 
-Home Gallery is a self-hosted application for collecting photos through Telegram and displaying them as a fullscreen browser slideshow. It also provides a web administration interface for managing the local media library.
+Self-hosted photo frame for your home: family and friends send photos to a Telegram bot, and the photos appear in a fullscreen browser slideshow on whatever screen you point at it. A separate administration app manages the library, the playback settings, and who is allowed to contribute.
 
-The project is under active development. The product requirements are in [docs/SPECIFICATION.md](docs/SPECIFICATION.md), the delivery sequence is in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md), and execution is tracked in the [GitHub issue backlog](https://github.com/mateuszsikora/home-gallery/issues). The integrated MVP evidence and security review are in [docs/VALIDATION.md](docs/VALIDATION.md).
+Everything runs on your own hardware, on your own network. In the default profile the only service Home Gallery talks to at runtime is the Telegram Bot API; pulling the images needs GHCR, and the optional TLS profile adds an ACME provider.
 
-The MVP HTTP routes and representative payloads are documented in [docs/API.md](docs/API.md).
+![The fullscreen gallery playing a photo](docs/screenshots/gallery-desktop.png)
 
-Production images, Docker Compose deployment, backup and restore, and rollback are documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+## Where this came from
 
-## Project status
+Home Gallery started as a screensaver for my [Glance](https://github.com/glanceapp/glance) dashboard — I wanted the screen showing Glance to fall back to family photos instead of going blank. That is why the gallery is its own bare URL at `/` with no navigation, no controls, and nothing to click: you open it in a kiosk or fullscreen tab and walk away. It then grew the parts a shared photo frame actually needs — a way for other people to add photos without touching the server, and a way for me to curate what ends up on the wall.
 
-Home Gallery is a personal project published so others can read, fork, and adapt it. It is maintained on a best-effort basis: issues and pull requests are welcome, but there is no support commitment or release schedule. Run it on a trusted network and review [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
+Note that the shipped images send `X-Frame-Options: DENY` and `frame-ancestors 'none'`, so the gallery is meant to be opened as its own tab or window rather than embedded in a dashboard iframe. Relaxing that is a deliberate change to `docker/web.conf`.
 
-The container images referenced by `docker-compose.yml` are published as public GHCR packages, so `docker compose pull` works without a registry login. To build them from source instead:
+## How it works
+
+```text
+Telegram contributor
+        │  photo message
+        ▼
+  Telegram bot  ──ingestion token──►  API server  ──►  SQLite + normalized media on disk
+                                          │
+                        ┌─────────────────┴─────────────────┐
+                        ▼                                   ▼
+              Fullscreen gallery                  Administration app
+              (public playlist)                   (administration session)
+```
+
+A contributor writes to the bot. Their first message creates a pending access request and gets a status reply — nothing is downloaded until you approve them in the administration app. Once approved, the photos they send are downloaded by the bot, uploaded to the API, normalized, and added to the playlist. The source message is deleted from the Telegram chat only after storage is confirmed; a failed upload stays in the chat and gets a status reply, so it can be retried.
+
+## Features
+
+**Gallery**
+
+- Fullscreen, unattended playback that needs no interaction and no input device.
+- Portrait and landscape photos without forced cropping. Three fit modes: blurred backdrop, crop-when-the-loss-is-small, or plain black bars.
+- Configurable time per photo (1 second to 60 minutes) and crossfade duration.
+- Sequential or shuffled order.
+- Preloads upcoming images, refreshes the playlist every 30 seconds, and keeps showing the last usable playlist while the API is unreachable.
+
+**Administration**
+
+- Reorder, hide, or delete photos; hidden photos stay in the library but leave the rotation.
+- Approve or reject Telegram contributors from the browser — no redeploy, no restart, no user IDs in config files.
+- Change playback settings live; the gallery picks them up on its next refresh.
+- Set, change, or remove the administration password from the app itself; no administration credential lives in `.env` or needs a redeploy.
+
+**Ingestion**
+
+- Telegram photo messages and JPEG, PNG, WebP, HEIC, and HEIF image documents.
+- Server-side content verification, size and decoded-pixel limits, EXIF orientation handling, and normalization to a browser-friendly format.
+- Optional direct upload from the administration app, off by default behind `HOME_GALLERY_ALLOW_ADMIN_UPLOADS`.
+
+![The administration app managing the library, contributors, and playback settings](docs/screenshots/admin-desktop.png)
+
+The upload control visible in the screenshot is always rendered, but the server rejects browser uploads unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`. Both interfaces reflow for narrow screens — see [the gallery](docs/screenshots/gallery-narrow.png) and [the administration app](docs/screenshots/admin-narrow.png) on a phone.
+
+## Quick start with Docker Compose
+
+You need Docker Engine with Compose v2, and a bot token from [BotFather](https://t.me/BotFather).
 
 ```bash
-docker compose --env-file .env build
+git clone https://github.com/mateuszsikora/home-gallery.git
+cd home-gallery
+cp .env.example .env
+chmod 600 .env
 ```
+
+Replace every placeholder in `.env`. At minimum:
+
+```bash
+# The ingestion credential, at least 32 characters:
+openssl rand -hex 32   # HOME_GALLERY_INGESTION_TOKEN
+# And the token BotFather gave you:
+#   HOME_GALLERY_TELEGRAM_BOT_TOKEN
+```
+
+Administration access is not configured here — you set the password from the app itself on first run.
+
+Then start the stack:
+
+```bash
+bash infra/deploy.sh
+```
+
+`deploy.sh` is the supported path: it validates `.env`, requires mode `600`, pins the Compose project name to `home-gallery`, pulls the configured image tag, and waits for the health checks. The images are public GHCR packages, so no registry login is needed.
+
+The equivalent raw command, if you prefer to see it spelled out:
+
+```bash
+docker compose --project-name home-gallery --env-file .env up -d --wait
+```
+
+Keep `--project-name home-gallery` either way. `infra/backup.sh` and `infra/restore.sh` refuse to operate on any other project name, and without the flag Compose derives the name from the directory — which silently breaks backup and restore in a fork, a ZIP download, or any directory not named `home-gallery`. Add `--build` to build from source instead of pulling.
+
+Home Gallery stays isolated from anything else on the host: its own Compose project, configuration, secrets, ports, containers, network, and data volume. It never joins another project's network, mounts its volumes, addresses its containers, or runs `--remove-orphans`. The default ports avoid the crowded `3000`–`3003` range for the same reason.
+
+| Service        | Default URL        |
+| -------------- | ------------------ |
+| Gallery        | `http://HOST:3010` |
+| Administration | `http://HOST:3011` |
+| API            | `http://HOST:3012` |
+
+Now open the administration app. **A fresh installation has no administration password** — the studio opens for anyone who can reach it and says so on every screen until you set one from its **Security** panel. Do that first. Then approve your first contributor after they write to the bot, point a browser at the gallery URL in kiosk or fullscreen mode, and leave it there.
+
+Backup, restore, rollback, host-port changes, and the optional TLS profile are covered in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Security posture
+
+The default profile serves plain HTTP and is meant for a trusted LAN or an authenticated private overlay network — not the public internet.
+
+**A new installation starts with the administration app unprotected.** There is no password in `.env` and no default password to look up; the studio is open to anyone who can reach port 3011 until an administrator sets one from the **Security** panel. That is a deliberate trade for a first-run experience on a trusted LAN, and it means the gallery should not be reachable from anywhere else until you have set the password. Passwords are 8 to 128 characters; setting, changing, or removing one signs out every other browser and keeps the one making the change signed in.
+
+Administration and ingestion are separate: the Telegram bot holds only `HOME_GALLERY_INGESTION_TOKEN` and cannot reach administration routes. Browser sessions exchange the password for an opaque `HttpOnly`, `SameSite=Strict` cookie held only in server memory, with an explicit anti-CSRF header on mutations and an eight-hour expiry. The password is never put in browser storage or a URL, is stored only as a salted scrypt hash, is never logged or returned by the API, and a rejected attempt consumes the same bounded authentication rate limit as any other failed credential. A server restart invalidates every session.
+
+Because the password hash lives in the gallery database rather than in the deployment configuration, a forgotten password is recovered by clearing its row on the host — see [Recovering a forgotten administration password](docs/DEPLOYMENT.md#recovering-a-forgotten-administration-password).
+
+For public exposure, use the supported TLS profile in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), which puts Caddy in front and binds the plain-HTTP ports to loopback. The threat model and reporting process are in [SECURITY.md](SECURITY.md); the security review record is in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Local development
 
-The foundation requires Node.js 26 and the npm version bundled with it. From a clean checkout:
+Requires Node.js 26 and the bundled npm. From a clean checkout:
 
 ```bash
 npm ci
 npm run check
 ```
 
-The repository-wide commands are:
+`npm run check` runs the CI sequence: `format:check`, `lint`, `typecheck`, `test`, `build`. Individual commands are `npm run format`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:watch`, and `npm run build`.
 
-- `npm run format` to format supported files;
-- `npm run format:check` to verify formatting;
-- `npm run lint` to run ESLint;
-- `npm run typecheck` to run TypeScript without emitting files;
-- `npm test` to run the test suite once;
-- `npm run test:watch` to rerun tests while files change;
-- `npm run build` to compile every workspace;
-- `npm run check` to run all required checks in CI order.
-
-The npm workspaces are the four applications under `apps/` and the three shared packages under `packages/`. They are intentionally minimal until their corresponding implementation issues are started. Copy `.env.example` to `.env` only when a later service requires local configuration; never commit credentials or runtime data.
-
-### Running the API server
-
-The server reads its configuration from the environment and refuses to start when a security-critical variable is missing or invalid. `.env.example` documents every variable and its default.
+The API server reads its configuration from the environment and refuses to start when a security-critical variable is missing or invalid:
 
 ```bash
 npm run build
@@ -51,80 +137,75 @@ HOME_GALLERY_DATA_DIR=./data \
 npm run start --workspace @home-gallery/server
 ```
 
-`GET /health` then reports the process state on `http://localhost:3012/health`. The data directory holds the SQLite database and the normalized media, and is created on first start; it must be a persistent volume in production.
+`GET http://localhost:3012/health` then reports process state. The data directory holds the SQLite database and the normalized media, is created on first start, and must be a persistent volume in production.
 
-### Running the fullscreen gallery
-
-The gallery is an unattended React application that fills the browser viewport, preserves portrait and landscape images without cropping, and follows the playlist timing and playback mode returned by the API. Start it against a running API server with:
+With the server running, start either frontend:
 
 ```bash
+# Gallery
 VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
-npm run dev --workspace @home-gallery/frontend
-```
+npm run dev --workspace @home-gallery/frontend -- --port 3010
 
-Open the Vite URL shown in the terminal. The API URL defaults to the gallery page origin when `VITE_HOME_GALLERY_API_URL` is omitted, which is suitable when a reverse proxy serves both applications on one origin. The gallery automatically retries playlist requests every 30 seconds, retains the last usable playlist while the API is unavailable, and needs no interaction during normal playback.
-
-### Running the administration application
-
-The administration application manages the media library, the playback settings, the Telegram contributors who may submit photos, and the password that protects the studio itself.
-
-A fresh installation has **no administration password**: the studio opens for anyone who can reach it, and says so on every screen until a password is set from its **Security** panel. Setting, changing, or removing the password signs out every other browser and keeps the one making the change signed in. Run the gallery on a trusted network, and set a password before the server is reachable from anywhere else.
-
-The administration application uses the same API URL and asks for the password once to create a short-lived server session. The password is never put in browser storage or a URL; subsequent requests use an opaque `HttpOnly`, `SameSite=Strict` cookie and an explicit anti-CSRF header for mutations. The in-memory session expires after eight hours by default, is invalidated by a server restart or the **Lock studio** action, and uses `Secure` automatically in the supported TLS profile. Administration uploads are disabled by default; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
-
-```bash
+# Administration
 VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
 npm run dev --workspace @home-gallery/admin -- --port 3011
 ```
 
-When the API and administration application use different origins during local development, include the administration origin in `HOME_GALLERY_ALLOWED_ORIGINS` before starting the server. For the command above, use `HOME_GALLERY_ALLOWED_ORIGINS=http://localhost:3011`. Cookie sessions require the two origins to remain same-site; the documented localhost ports satisfy that requirement. In production, the bundled reverse proxy serves the API and administration application from one origin.
+`VITE_HOME_GALLERY_API_URL` defaults to the page origin when omitted, which is what production uses behind the bundled reverse proxy. In development the two frontends are on different origins than the API, so list them in `HOME_GALLERY_ALLOWED_ORIGINS` when starting the server — for the commands above, `HOME_GALLERY_ALLOWED_ORIGINS=http://localhost:3010,http://localhost:3011`. Neither Vite config pins a port, so pass `--port` explicitly; otherwise they land on Vite's default and the API rejects their requests.
 
-### Running the Telegram bot
-
-Create a bot with BotFather and configure the bot variables documented in `.env.example`. The bot uses the ingestion credential and cannot call administration routes.
+And the bot:
 
 ```bash
 HOME_GALLERY_TELEGRAM_BOT_TOKEN="<bot-token>" \
 HOME_GALLERY_API_URL=http://localhost:3012 \
 HOME_GALLERY_INGESTION_TOKEN="<server-ingestion-token>" \
-HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES=26214400 \
 npm run start --workspace @home-gallery/telegram-bot
 ```
 
-Contributors are approved in the administration application rather than configured at deployment time. The first message from an unknown Telegram user creates a pending access request and is answered with a status reply; the bot does not look up or download anything until an administrator approves the request, and the server refuses Telegram uploads from anybody else.
+Keep `HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES` at or below the server's `HOME_GALLERY_MAX_UPLOAD_BYTES` so oversized responses are rejected before they are buffered for upload.
 
-Approved users can send Telegram photo messages or JPEG, PNG, WebP, HEIC, and HEIF image documents. The bot chooses the largest available Telegram photo, enforces its download limit while streaming the response, uploads it with contributor attribution, and deletes the source message only after Home Gallery confirms storage. Keep the bot download limit at or below the server upload limit. Unsupported, oversized, or unapproved submissions are not uploaded. Failed uploads remain in the chat and receive a status reply so they can be retried.
+`npm run test:compose` exercises upload, restart persistence, backup, and restore in a disposable Compose project.
 
-## Agent-driven development
+## Repository layout
 
-Development is organized as one GitHub issue per pull request. A new agent session only needs this prompt:
+An npm-workspaces TypeScript monorepo:
+
+| Path                                | Contents                                                   |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `apps/server`                       | Fastify API, SQLite, media normalization and storage       |
+| `apps/frontend`                     | React fullscreen gallery                                   |
+| `apps/admin`                        | React administration app                                   |
+| `apps/telegram-bot`                 | Telegram ingestion bot                                     |
+| `packages/`                         | `api-client`, `config`, `shared-types`                     |
+| `infra/`                            | `deploy.sh`, `backup.sh`, `restore.sh`                     |
+| `docker/`                           | nginx and Caddy configuration for the web containers       |
+| `scripts/`                          | Compose and TLS smoke tests                                |
+| `Dockerfile`, `docker-compose*.yml` | Multi-target image build and the Compose stack             |
+| `docs/`                             | Specification, plan, API contracts, deployment, validation |
+
+Each application is independently deployable and talks only through public APIs or shared contracts.
+
+## Documentation
+
+- [docs/SPECIFICATION.md](docs/SPECIFICATION.md) — product requirements
+- [docs/API.md](docs/API.md) — HTTP routes and payloads
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — production deployment, backup, restore, rollback, TLS
+- [docs/VALIDATION.md](docs/VALIDATION.md) — MVP evidence and security review
+- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — delivery sequence
+- [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md) — how the project is built
+
+## How this project is built
+
+Home Gallery is developed by coding agents, one GitHub issue per pull request. A new session needs only this prompt:
 
 > Read the Markdown files and continue the project.
 
-The repository instructions in [AGENTS.md](AGENTS.md) tell the agent how to select a ready issue, implement it, validate it, and open a pull request.
+[AGENTS.md](AGENTS.md) tells the agent how to pick a ready issue, implement it, validate it, and open a pull request. The backlog is the [GitHub issue list](https://github.com/mateuszsikora/home-gallery/issues).
 
-## Planned architecture
+## Status and contributing
 
-The application will use a TypeScript monorepo containing:
+This is a personal project, published so others can read, fork, and adapt it. It is maintained on a best-effort basis: issues and pull requests are welcome, but there is no support commitment and no release schedule. Run it on a trusted network and read [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
 
-- a Fastify API server with SQLite and local media storage;
-- a React fullscreen gallery;
-- a React administration application;
-- a Telegram bot;
-- shared API contracts and configuration utilities;
-- Docker Compose deployment for local-network hosting.
+## License
 
-Each application will remain independently deployable and communicate through public APIs or shared contracts.
-
-## Deployment target
-
-The MVP runs on a LAN server that may already host unrelated stacks, so Home Gallery stays self-contained: it uses its own Compose project, configuration directory, secrets, ports, containers, network, and persistent data, and never addresses another project's resources. Images are published to GHCR by CI and deployed to the host by an operator.
-
-From a configured production checkout, validate and start the isolated stack with:
-
-```bash
-docker compose --env-file .env config --quiet
-docker compose --env-file .env up -d --build --wait
-```
-
-The default LAN endpoints are gallery `:3010`, administration `:3011`, and API `:3012`. Use `npm run test:compose` to exercise image upload, restart persistence, coordinated backup, and restore in a disposable Compose project.
+[MIT](LICENSE)
