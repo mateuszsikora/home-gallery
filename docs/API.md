@@ -77,7 +77,7 @@ A fresh installation has no administration password, and anyone who can reach th
 }
 ```
 
-`currentPassword` is required exactly when a password is already configured. `DELETE /api/admin/password` takes the same session, the same CSRF header, and a body with only `currentPassword`; it returns the installation to the unprotected default. Both routes return `204 No Content`, invalidate every other administration session, and keep the calling session valid.
+`currentPassword` is required exactly when a password is already configured. `DELETE /api/admin/password` takes the same session, the same CSRF header, and a body with only `currentPassword`; it returns the installation to the unprotected default, and answers `409` with error code `conflict` when there is no password to remove. Both routes return `204 No Content` on success, invalidate every other administration session, and keep the calling session valid.
 
 A password is 8 to 128 characters and may not contain control characters. A wrong `currentPassword` is answered with `403` and error code `forbidden`, which distinguishes it from the `401` that an expired session produces. Passwords are stored only as salted scrypt hashes, are never logged, and are never returned by the API.
 
@@ -99,7 +99,9 @@ The response exposes only the server-side expiry:
 }
 ```
 
-`GET /api/admin/session` restores a valid cookie session. `DELETE /api/admin/session` requires `X-Home-Gallery-CSRF: 1`, removes the server-side session, clears the cookie, and returns `204 No Content`. Sessions are held only in bounded process memory: the default lifetime is eight hours, the default capacity is 64, the oldest live session is evicted at capacity, and every server restart invalidates all sessions. A rejected password consumes the same authentication rate limit as any other failed credential.
+`GET /api/admin/session` restores a valid cookie session. `DELETE /api/admin/session` requires `X-Home-Gallery-CSRF: 1`, removes the server-side session, clears the cookie, and returns `204 No Content`. Sessions are held only in bounded process memory: the default lifetime is eight hours, the default capacity is 64, the oldest live session is evicted at capacity, and every server restart invalidates all sessions.
+
+A rejected password consumes the same authentication rate limit as any other failed credential. A client that has already exhausted that limit is answered `429` before its password is checked at all, so repeated attempts cannot keep the server deriving password hashes.
 
 ### Health
 

@@ -191,6 +191,8 @@ The server container runs as UID/GID `1000`, has a read-only root filesystem, an
 
 Do not edit the volume while the API server is running. Do not copy only the SQLite file: metadata and referenced media must be backed up as one coordinated unit.
 
+The administration password hash lives in that database, so a backup carries whichever password was in force when it was taken. Restoring an older backup restores that password along with the library; if it is not the current one, sign in with the older password or clear the row as described in [Recovering a forgotten administration password](#recovering-a-forgotten-administration-password).
+
 ## Backup
 
 Run a local backup manually:
@@ -244,6 +246,8 @@ The smoke test also verifies passwordless session creation, setting an administr
 ## Upgrade and rollback
 
 The default-branch workflow publishes `latest` and immutable `sha-<12-character-commit>` tags. Pin the tag you want in the host `.env` before calling `deploy.sh`.
+
+**Upgrading past the release that removed `HOME_GALLERY_ADMIN_TOKEN` leaves the administration application unprotected.** Compose no longer passes the variable, the server starts without it, and a panel that was credential-protected before the upgrade is open to the whole network afterwards; the only runtime signal is a `warn` line in the server log. Immediately after that upgrade, open the administration application, set a password from its Security panel, and delete the now-unused `HOME_GALLERY_ADMIN_TOKEN` and `HOME_GALLERY_ADMIN_TOKEN_PREVIOUS` lines from `.env`.
 
 For a manual upgrade:
 

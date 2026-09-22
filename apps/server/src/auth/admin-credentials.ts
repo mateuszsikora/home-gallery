@@ -8,8 +8,8 @@ export interface AdminCredentials {
    * no password accepts every candidate, including none at all, which is what
    * makes a fresh gallery usable without any setup.
    */
-  accepts(candidate: string | undefined): boolean;
-  setPassword(password: string): void;
+  accepts(candidate: string | undefined): Promise<boolean>;
+  setPassword(password: string): Promise<void>;
   clearPassword(): void;
 }
 
@@ -18,7 +18,7 @@ export const createAdminCredentials = (
 ): AdminCredentials => ({
   isPasswordConfigured: () => repository.readPasswordHash() !== undefined,
 
-  accepts: (candidate) => {
+  accepts: async (candidate) => {
     const storedHash = repository.readPasswordHash();
 
     if (storedHash === undefined) {
@@ -26,12 +26,13 @@ export const createAdminCredentials = (
     }
 
     return (
-      candidate !== undefined && verifyAdminPassword(candidate, storedHash)
+      candidate !== undefined &&
+      (await verifyAdminPassword(candidate, storedHash))
     );
   },
 
-  setPassword: (password) => {
-    repository.setPasswordHash(hashAdminPassword(password));
+  setPassword: async (password) => {
+    repository.setPasswordHash(await hashAdminPassword(password));
   },
 
   clearPassword: () => {

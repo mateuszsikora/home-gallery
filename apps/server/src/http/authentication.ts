@@ -14,7 +14,7 @@ import type { AdminSessionStore } from './admin-session-store.js';
 import { ADMIN_SESSION_COOKIE_NAME } from './admin-session-routes.js';
 import { ApiError } from './errors.js';
 import { rejectWhenRateLimited } from './rate-limit.js';
-import type { FixedWindowRateLimiter } from './rate-limit.js';
+import type { FixedWindowRateLimiter, RateLimitResult } from './rate-limit.js';
 
 const BEARER_SCHEME = 'bearer';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -64,6 +64,16 @@ declare module 'fastify' {
   interface FastifyInstance {
     hasAdministrationAuthentication: (request: FastifyRequest) => boolean;
     /**
+     * Rejects a client that has already exhausted the authentication limit,
+     * without counting the current request. Routes that must derive a password
+     * hash before they can tell success from failure call this first, so an
+     * exhausted client never makes the server do that work.
+     */
+    guardAdministrationAttempt: (
+      request: FastifyRequest,
+      reply: Parameters<onRequestHookHandler>[1],
+    ) => void;
+    /**
      * Counts a failed credential check for the requesting address and rejects
      * the request. Routes that validate a password themselves reuse it so every
      * administration failure shares one limit. A route that already has a valid
@@ -96,15 +106,12 @@ export const registerAuthentication = (
 ): void => {
   app.decorateRequest('administrationSessionExpiresAt', null);
 
-  const reject = (
+  const enforceLimit = (
     request: FastifyRequest,
     reply: Parameters<onRequestHookHandler>[1],
     scope: 'administration' | 'ingestion',
-    message: string,
-    code: 'forbidden' | 'unauthorized' = 'unauthorized',
-  ): never => {
-    const result = options.failureLimiter.consume(request.ip);
-
+    result: RateLimitResult,
+  ): void => {
     if (!result.allowed && result.firstRejection) {
       request.log.warn(
         {
@@ -121,6 +128,21 @@ export const registerAuthentication = (
       result,
       reply,
       'Too many invalid authentication attempts',
+    );
+  };
+
+  const reject = (
+    request: FastifyRequest,
+    reply: Parameters<onRequestHookHandler>[1],
+    scope: 'administration' | 'ingestion',
+    message: string,
+    code: 'forbidden' | 'unauthorized' = 'unauthorized',
+  ): never => {
+    enforceLimit(
+      request,
+      reply,
+      scope,
+      options.failureLimiter.consume(request.ip),
     );
     throw new ApiError(code, message);
   };
@@ -151,6 +173,18 @@ export const registerAuthentication = (
   app.decorate(
     'hasAdministrationAuthentication',
     (request: FastifyRequest): boolean => acceptAdministrationSession(request),
+  );
+
+  app.decorate(
+    'guardAdministrationAttempt',
+    (request: FastifyRequest, reply: Parameters<onRequestHookHandler>[1]) => {
+      enforceLimit(
+        request,
+        reply,
+        'administration',
+        options.failureLimiter.check(request.ip),
+      );
+    },
   );
 
   app.decorate(

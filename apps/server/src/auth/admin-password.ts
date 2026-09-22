@@ -1,4 +1,5 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
 
 /**
  * Work factors for a new hash. They are also encoded into every stored hash, so
@@ -19,13 +20,25 @@ const KEY_BYTES = 64;
 const ALGORITHM = 'scrypt';
 const FIELD_SEPARATOR = '$';
 
+/**
+ * Derivation runs on the libuv thread pool rather than the request thread. A
+ * single sign-in costs tens of milliseconds on the modest hardware this project
+ * targets, and blocking for that long would stall gallery playback too.
+ */
+const deriveKey = promisify(scrypt) as (
+  password: string,
+  salt: Buffer,
+  keyBytes: number,
+  options: ScryptParameters & { maxmem: number },
+) => Promise<Buffer>;
+
 const derive = (
   password: string,
   salt: Buffer,
   keyBytes: number,
   parameters: ScryptParameters,
-): Buffer =>
-  scryptSync(password.normalize('NFC'), salt, keyBytes, {
+): Promise<Buffer> =>
+  deriveKey(password.normalize('NFC'), salt, keyBytes, {
     ...parameters,
     maxmem: SCRYPT_MAX_MEMORY,
   });
@@ -35,9 +48,9 @@ const derive = (
  * and its cost parameters so verification never depends on the constants that
  * happened to be current when the password was set.
  */
-export const hashAdminPassword = (password: string): string => {
+export const hashAdminPassword = async (password: string): Promise<string> => {
   const salt = randomBytes(SALT_BYTES);
-  const key = derive(password, salt, KEY_BYTES, SCRYPT_PARAMETERS);
+  const key = await derive(password, salt, KEY_BYTES, SCRYPT_PARAMETERS);
 
   return [
     ALGORITHM,
@@ -67,10 +80,10 @@ const parsePositiveInteger = (
  * false instead of throwing, so a damaged row locks the studio rather than
  * crashing every administration request.
  */
-export const verifyAdminPassword = (
+export const verifyAdminPassword = async (
   password: string,
   storedHash: string,
-): boolean => {
+): Promise<boolean> => {
   const [algorithm, rawN, rawR, rawP, rawSalt, rawKey] =
     storedHash.split(FIELD_SEPARATOR);
 
@@ -100,7 +113,7 @@ export const verifyAdminPassword = (
   let candidate: Buffer;
 
   try {
-    candidate = derive(password, salt, expected.length, { N, p, r });
+    candidate = await derive(password, salt, expected.length, { N, p, r });
   } catch {
     return false;
   }

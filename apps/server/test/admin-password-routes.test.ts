@@ -166,6 +166,18 @@ describe('administration password routes', () => {
     expect(await passwordConfigured()).toBe(false);
   });
 
+  it('refuses to remove a password that was never set', async () => {
+    const response = await removePassword({
+      currentPassword: TEST_ADMIN_PASSWORD,
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
+      'conflict',
+    );
+    expect(await passwordConfigured()).toBe(false);
+  });
+
   it('requires an administration session', async () => {
     expect(
       (await setPassword({ newPassword: TEST_ADMIN_PASSWORD }, null))

@@ -191,18 +191,29 @@ if [[ "$WRONG_PASSWORD_STATUS" != "401" ]]; then
   echo "ERROR: A wrong password received $WRONG_PASSWORD_STATUS." >&2
   exit 1
 fi
-if grep -q "$ADMIN_PASSWORD" "$TEMP_DIR/session-body.json"; then
-  echo "ERROR: The administration password was echoed by the API." >&2
-  exit 1
-fi
-
 SESSION_STATUS=$(open_admin_session "$SESSION_COOKIE_JAR" "$ADMIN_PASSWORD")
 if [[ "$SESSION_STATUS" != "201" ]]; then
   echo "ERROR: The correct password received $SESSION_STATUS." >&2
   exit 1
 fi
+if grep -q "$ADMIN_PASSWORD" "$TEMP_DIR/session-body.json"; then
+  echo "ERROR: The administration password was echoed by the API." >&2
+  exit 1
+fi
 if grep -q "$ADMIN_PASSWORD" "$SESSION_COOKIE_JAR"; then
   echo "ERROR: The administration password leaked into the cookie jar." >&2
+  exit 1
+fi
+
+REMOVE_MISSING_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$SESSION_COOKIE_JAR" \
+  --request DELETE \
+  --header 'X-Home-Gallery-CSRF: 1' \
+  --header 'Content-Type: application/json' \
+  --data '{"currentPassword":"not-the-password"}' \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/admin/password")
+if [[ "$REMOVE_MISSING_STATUS" != "403" ]]; then
+  echo "ERROR: Removing with a wrong password received $REMOVE_MISSING_STATUS." >&2
   exit 1
 fi
 

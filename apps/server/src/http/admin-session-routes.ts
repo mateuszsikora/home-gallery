@@ -46,12 +46,17 @@ export const registerAdminSessionRoutes = (
       );
     }
 
+    // Checked before the password is verified: deriving a scrypt hash is the
+    // expensive part of this route, and a client that is already over its limit
+    // must not be able to make the server pay for it.
+    app.guardAdministrationAttempt(request, reply);
+
     const { password } = parseRequestBody(
       adminSessionRequestSchema,
       request.body ?? {},
     );
 
-    if (!options.credentials.accepts(password)) {
+    if (!(await options.credentials.accepts(password))) {
       app.rejectAdministrationAttempt(
         request,
         reply,

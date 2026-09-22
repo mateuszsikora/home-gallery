@@ -35,6 +35,38 @@ export class FixedWindowRateLimiter {
     readonly now: () => number = Date.now,
   ) {}
 
+  /**
+   * Reports whether a client has already exhausted its window without counting
+   * the current request. Callers that must do expensive work before they can
+   * tell success from failure check first, so an exhausted client is answered
+   * without paying for that work.
+   */
+  check(clientId: string): RateLimitResult {
+    const now = this.now();
+    // An unknown client falls back to the shared overflow window, because that
+    // is the bucket `consume` would charge it once the map is full. Without it
+    // a flood of forged addresses would do the expensive work every time.
+    const window =
+      this.#windows.get(clientId) ?? this.#windows.get(OVERFLOW_KEY);
+
+    if (
+      window === undefined ||
+      window.resetAt <= now ||
+      window.count < this.config.max
+    ) {
+      return { allowed: true, firstRejection: false, retryAfterSeconds: 0 };
+    }
+
+    const firstRejection = !window.rejectionReported;
+    window.rejectionReported = true;
+
+    return {
+      allowed: false,
+      firstRejection,
+      retryAfterSeconds: Math.max(1, Math.ceil((window.resetAt - now) / 1_000)),
+    };
+  }
+
   consume(clientId: string): RateLimitResult {
     const now = this.now();
     let key = clientId;

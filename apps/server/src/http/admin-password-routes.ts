@@ -8,6 +8,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AdminCredentials } from '../auth/admin-credentials.js';
 import { ADMIN_SESSION_COOKIE_NAME } from './admin-session-routes.js';
 import type { AdminSessionStore } from './admin-session-store.js';
+import { ApiError } from './errors.js';
 import { parseRequestBody } from './validation.js';
 
 /**
@@ -25,12 +26,14 @@ export const registerAdminPasswordRoutes = (
 ): void => {
   const protectedRoute = { onRequest: app.requireAdministrationSession };
 
-  const requireCurrentPassword = (
+  const requireCurrentPassword = async (
     request: FastifyRequest,
     reply: FastifyReply,
     currentPassword: string | undefined,
-  ): void => {
-    if (!options.credentials.accepts(currentPassword)) {
+  ): Promise<void> => {
+    app.guardAdministrationAttempt(request, reply);
+
+    if (!(await options.credentials.accepts(currentPassword))) {
       app.rejectAdministrationAttempt(
         request,
         reply,
@@ -47,8 +50,8 @@ export const registerAdminPasswordRoutes = (
       'Invalid administration password',
     );
 
-    requireCurrentPassword(request, reply, currentPassword);
-    options.credentials.setPassword(newPassword);
+    await requireCurrentPassword(request, reply, currentPassword);
+    await options.credentials.setPassword(newPassword);
     options.sessionStore.deleteOthers(
       request.cookies[ADMIN_SESSION_COOKIE_NAME],
     );
@@ -67,7 +70,17 @@ export const registerAdminPasswordRoutes = (
         'Invalid administration password',
       );
 
-      requireCurrentPassword(request, reply, currentPassword);
+      // Without this an unprotected installation would answer `204` after
+      // accepting a password it never checked, and the app would report a
+      // removal that did not happen.
+      if (!options.credentials.isPasswordConfigured()) {
+        throw new ApiError(
+          'conflict',
+          'This gallery has no administration password to remove',
+        );
+      }
+
+      await requireCurrentPassword(request, reply, currentPassword);
       options.credentials.clearPassword();
       options.sessionStore.deleteOthers(
         request.cookies[ADMIN_SESSION_COOKIE_NAME],

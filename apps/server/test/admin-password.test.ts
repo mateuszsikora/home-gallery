@@ -10,26 +10,26 @@ import {
 const PASSWORD = 'a-quiet-house-in-the-evening';
 
 describe('administration password hashing', () => {
-  it('verifies the password it hashed', () => {
-    expect(verifyAdminPassword(PASSWORD, hashAdminPassword(PASSWORD))).toBe(
-      true,
-    );
+  it('verifies the password it hashed', async () => {
+    await expect(
+      verifyAdminPassword(PASSWORD, await hashAdminPassword(PASSWORD)),
+    ).resolves.toBe(true);
   });
 
-  it('never stores the password itself', () => {
-    expect(hashAdminPassword(PASSWORD)).not.toContain(PASSWORD);
+  it('never stores the password itself', async () => {
+    expect(await hashAdminPassword(PASSWORD)).not.toContain(PASSWORD);
   });
 
-  it('salts every hash, so the same password hashes differently', () => {
-    const first = hashAdminPassword(PASSWORD);
-    const second = hashAdminPassword(PASSWORD);
+  it('salts every hash, so the same password hashes differently', async () => {
+    const first = await hashAdminPassword(PASSWORD);
+    const second = await hashAdminPassword(PASSWORD);
 
     expect(first).not.toBe(second);
-    expect(verifyAdminPassword(PASSWORD, second)).toBe(true);
+    await expect(verifyAdminPassword(PASSWORD, second)).resolves.toBe(true);
   });
 
-  it('records the algorithm and its cost parameters', () => {
-    expect(hashAdminPassword(PASSWORD).split('$').slice(0, 4)).toEqual([
+  it('records the algorithm and its cost parameters', async () => {
+    expect((await hashAdminPassword(PASSWORD)).split('$').slice(0, 4)).toEqual([
       'scrypt',
       '16384',
       '8',
@@ -37,7 +37,7 @@ describe('administration password hashing', () => {
     ]);
   });
 
-  it('verifies a hash that was produced with other cost parameters', () => {
+  it('verifies a hash that was produced with other cost parameters', async () => {
     // A password stored before the cost was raised has to keep working, so
     // verification follows the parameters in the record instead of the current
     // constants.
@@ -53,8 +53,10 @@ describe('administration password hashing', () => {
       key.toString('base64url'),
     ].join('$');
 
-    expect(verifyAdminPassword(PASSWORD, stored)).toBe(true);
-    expect(verifyAdminPassword('something-else-entirely', stored)).toBe(false);
+    await expect(verifyAdminPassword(PASSWORD, stored)).resolves.toBe(true);
+    await expect(
+      verifyAdminPassword('something-else-entirely', stored),
+    ).resolves.toBe(false);
   });
 
   it.each([
@@ -62,25 +64,25 @@ describe('administration password hashing', () => {
     ['a prefix of the password', PASSWORD.slice(0, -1)],
     ['the password with an extra character', `${PASSWORD}!`],
     ['an empty candidate', ''],
-  ])('rejects %s', (_label, candidate) => {
-    expect(verifyAdminPassword(candidate, hashAdminPassword(PASSWORD))).toBe(
-      false,
-    );
+  ])('rejects %s', async (_label, candidate) => {
+    await expect(
+      verifyAdminPassword(candidate, await hashAdminPassword(PASSWORD)),
+    ).resolves.toBe(false);
   });
 
-  it('rejects a tampered digest', () => {
-    const fields = hashAdminPassword(PASSWORD).split('$');
+  it('rejects a tampered digest', async () => {
+    const fields = (await hashAdminPassword(PASSWORD)).split('$');
     const digest = fields[5] as string;
     const tampered = [
       ...fields.slice(0, 5),
       `${digest.startsWith('A') ? 'B' : 'A'}${digest.slice(1)}`,
     ].join('$');
 
-    expect(verifyAdminPassword(PASSWORD, tampered)).toBe(false);
+    await expect(verifyAdminPassword(PASSWORD, tampered)).resolves.toBe(false);
   });
 
-  it('rejects a tampered salt', () => {
-    const fields = hashAdminPassword(PASSWORD).split('$');
+  it('rejects a tampered salt', async () => {
+    const fields = (await hashAdminPassword(PASSWORD)).split('$');
     const salt = fields[4] as string;
     const tampered = [
       ...fields.slice(0, 4),
@@ -88,7 +90,7 @@ describe('administration password hashing', () => {
       fields[5],
     ].join('$');
 
-    expect(verifyAdminPassword(PASSWORD, tampered)).toBe(false);
+    await expect(verifyAdminPassword(PASSWORD, tampered)).resolves.toBe(false);
   });
 
   it.each([
@@ -100,7 +102,10 @@ describe('administration password hashing', () => {
     ['an empty salt', 'scrypt$16384$8$1$$aGFzaA'],
     ['an empty digest', 'scrypt$16384$8$1$c2FsdA$'],
     ['a cost beyond the memory limit', 'scrypt$1048576$8$1$c2FsdA$aGFzaA'],
-  ])('reports a stored hash with %s as unverifiable', (_label, stored) => {
-    expect(verifyAdminPassword(PASSWORD, stored)).toBe(false);
-  });
+  ])(
+    'reports a stored hash with %s as unverifiable',
+    async (_label, stored) => {
+      await expect(verifyAdminPassword(PASSWORD, stored)).resolves.toBe(false);
+    },
+  );
 });
