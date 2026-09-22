@@ -11,6 +11,8 @@ import {
   openDatabase,
   type DatabaseConnection,
 } from './database/connection.js';
+import { createAdminCredentials } from './auth/admin-credentials.js';
+import { createAdminCredentialRepository } from './database/admin-credential-repository.js';
 import { migrate } from './database/migrations.js';
 import {
   createMediaRepository,
@@ -24,6 +26,7 @@ import {
   createTelegramContributorRepository,
   type TelegramContributorRepository,
 } from './database/telegram-contributor-repository.js';
+import { registerAdminPasswordRoutes } from './http/admin-password-routes.js';
 import { AdminSessionStore } from './http/admin-session-store.js';
 import { registerAdminSessionRoutes } from './http/admin-session-routes.js';
 import { registerAuthentication } from './http/authentication.js';
@@ -134,9 +137,11 @@ export const createApp = async (
     registerErrorHandling(app);
     await app.register(cookie);
 
+    const adminCredentials = createAdminCredentials(
+      createAdminCredentialRepository(database),
+    );
     const adminSessionStore = new AdminSessionStore(config.adminSession);
     registerAuthentication(app, {
-      administrationTokens: config.administrationTokens,
       ingestionTokens: config.ingestionTokens,
       allowAdministrationUploads: config.allowAdministrationUploads,
       failureLimiter: new FixedWindowRateLimiter(
@@ -173,7 +178,12 @@ export const createApp = async (
       startedAt,
     });
     registerAdminSessionRoutes(app, {
+      credentials: adminCredentials,
       secureCookie: config.adminSession.secure,
+      sessionStore: adminSessionStore,
+    });
+    registerAdminPasswordRoutes(app, {
+      credentials: adminCredentials,
       sessionStore: adminSessionStore,
     });
     registerMediaUploadRoute(app);
@@ -196,6 +206,8 @@ export const createApp = async (
         authenticationRateLimit: config.authenticationRateLimit,
         uploadRateLimit: config.uploadRateLimit,
         allowAdministrationUploads: config.allowAdministrationUploads,
+        administrationPasswordConfigured:
+          adminCredentials.isPasswordConfigured(),
         adminSession: {
           max: config.adminSession.max,
           secure: config.adminSession.secure,
@@ -204,6 +216,12 @@ export const createApp = async (
       },
       'Home Gallery server initialized',
     );
+
+    if (!adminCredentials.isPasswordConfigured()) {
+      app.log.warn(
+        'No administration password is set; anyone who can reach this server can administer the gallery',
+      );
+    }
 
     return app;
   } catch (error) {

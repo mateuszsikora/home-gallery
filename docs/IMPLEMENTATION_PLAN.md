@@ -43,18 +43,18 @@ An issue may adjust a library choice when implementation evidence justifies it, 
 
 The planned MVP API is:
 
-| Method   | Path              | Access               | Purpose                                     |
-| -------- | ----------------- | -------------------- | ------------------------------------------- |
-| `GET`    | `/health`         | Public               | Liveness and readiness signal               |
-| `POST`   | `/api/media`      | Ingestion token      | Validate, normalize, and store an image     |
-| `GET`    | `/api/media`      | Administration token | List all media for administration           |
-| `GET`    | `/api/media/{id}` | Administration token | Return media metadata                       |
-| `PATCH`  | `/api/media/{id}` | Administration token | Enable, disable, or reorder media           |
-| `DELETE` | `/api/media/{id}` | Administration token | Delete metadata and its local file          |
-| `GET`    | `/api/playlist`   | Public               | Return enabled media and slideshow settings |
-| `GET`    | `/media/{id}`     | Public               | Stream an enabled normalized image          |
-| `GET`    | `/api/settings`   | Administration token | Read gallery settings                       |
-| `PATCH`  | `/api/settings`   | Administration token | Update gallery settings                     |
+| Method   | Path              | Access          | Purpose                                     |
+| -------- | ----------------- | --------------- | ------------------------------------------- |
+| `GET`    | `/health`         | Public          | Liveness and readiness signal               |
+| `POST`   | `/api/media`      | Ingestion token | Validate, normalize, and store an image     |
+| `GET`    | `/api/media`      | Admin session   | List all media for administration           |
+| `GET`    | `/api/media/{id}` | Admin session   | Return media metadata                       |
+| `PATCH`  | `/api/media/{id}` | Admin session   | Enable, disable, or reorder media           |
+| `DELETE` | `/api/media/{id}` | Admin session   | Delete metadata and its local file          |
+| `GET`    | `/api/playlist`   | Public          | Return enabled media and slideshow settings |
+| `GET`    | `/media/{id}`     | Public          | Stream an enabled normalized image          |
+| `GET`    | `/api/settings`   | Admin session   | Read gallery settings                       |
+| `PATCH`  | `/api/settings`   | Admin session   | Update gallery settings                     |
 
 Post-MVP issue #26 adds `/api/telegram/contributors` so contributor access is granted in the administration application instead of in deployment configuration.
 

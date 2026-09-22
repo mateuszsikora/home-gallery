@@ -14,7 +14,7 @@ import type { AdminSessionStore } from './admin-session-store.js';
 import { ADMIN_SESSION_COOKIE_NAME } from './admin-session-routes.js';
 import { ApiError } from './errors.js';
 import { rejectWhenRateLimited } from './rate-limit.js';
-import type { FixedWindowRateLimiter } from './rate-limit.js';
+import type { FixedWindowRateLimiter, RateLimitResult } from './rate-limit.js';
 
 const BEARER_SCHEME = 'bearer';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -57,20 +57,40 @@ const matchesAny = (
   candidate !== undefined &&
   expectedTokens.some((expected) => secretsMatch(candidate, expected));
 
-const hasValidCsrfHeader = (request: FastifyRequest): boolean =>
+export const hasValidCsrfHeader = (request: FastifyRequest): boolean =>
   request.headers[ADMIN_SESSION_CSRF_HEADER] === ADMIN_SESSION_CSRF_VALUE;
 
 declare module 'fastify' {
   interface FastifyInstance {
     hasAdministrationAuthentication: (request: FastifyRequest) => boolean;
-    requireAdministrationBearerToken: onRequestHookHandler;
+    /**
+     * Rejects a client that has already exhausted the authentication limit,
+     * without counting the current request. Routes that must derive a password
+     * hash before they can tell success from failure call this first, so an
+     * exhausted client never makes the server do that work.
+     */
+    guardAdministrationAttempt: (
+      request: FastifyRequest,
+      reply: Parameters<onRequestHookHandler>[1],
+    ) => void;
+    /**
+     * Counts a failed credential check for the requesting address and rejects
+     * the request. Routes that validate a password themselves reuse it so every
+     * administration failure shares one limit. A route that already has a valid
+     * session passes `forbidden`, which keeps a mistyped current password from
+     * looking like an expired session to the administration app.
+     */
+    rejectAdministrationAttempt: (
+      request: FastifyRequest,
+      reply: Parameters<onRequestHookHandler>[1],
+      message?: string,
+      code?: 'forbidden' | 'unauthorized',
+    ) => never;
     requireAdministrationSession: onRequestHookHandler;
-    requireAdministrationToken: onRequestHookHandler;
     requireIngestionToken: onRequestHookHandler;
   }
 
   interface FastifyRequest {
-    administrationAuthentication: 'bearer' | 'session' | null;
     administrationSessionExpiresAt: number | null;
   }
 }
@@ -78,23 +98,20 @@ declare module 'fastify' {
 export const registerAuthentication = (
   app: FastifyInstance,
   options: {
-    administrationTokens: readonly string[];
     ingestionTokens: readonly string[];
     allowAdministrationUploads: boolean;
     failureLimiter: FixedWindowRateLimiter;
     sessionStore: AdminSessionStore;
   },
 ): void => {
-  app.decorateRequest('administrationAuthentication', null);
   app.decorateRequest('administrationSessionExpiresAt', null);
 
-  const reject = (
+  const enforceLimit = (
     request: FastifyRequest,
     reply: Parameters<onRequestHookHandler>[1],
     scope: 'administration' | 'ingestion',
-  ): never => {
-    const result = options.failureLimiter.consume(request.ip);
-
+    result: RateLimitResult,
+  ): void => {
     if (!result.allowed && result.firstRejection) {
       request.log.warn(
         {
@@ -112,24 +129,22 @@ export const registerAuthentication = (
       reply,
       'Too many invalid authentication attempts',
     );
-    throw new ApiError(
-      'unauthorized',
-      'A valid bearer token or administration session is required',
-    );
   };
 
-  const acceptAdministrationBearer = (request: FastifyRequest): boolean => {
-    if (
-      !matchesAny(
-        readBearerToken(request.headers.authorization),
-        options.administrationTokens,
-      )
-    ) {
-      return false;
-    }
-
-    request.administrationAuthentication = 'bearer';
-    return true;
+  const reject = (
+    request: FastifyRequest,
+    reply: Parameters<onRequestHookHandler>[1],
+    scope: 'administration' | 'ingestion',
+    message: string,
+    code: 'forbidden' | 'unauthorized' = 'unauthorized',
+  ): never => {
+    enforceLimit(
+      request,
+      reply,
+      scope,
+      options.failureLimiter.consume(request.ip),
+    );
+    throw new ApiError(code, message);
   };
 
   const acceptAdministrationSession = (request: FastifyRequest): boolean => {
@@ -148,39 +163,48 @@ export const registerAuthentication = (
       );
     }
 
-    request.administrationAuthentication = 'session';
     request.administrationSessionExpiresAt = record.expiresAt;
     return true;
   };
 
-  // Reports the same bearer and session checks without rejecting, for routes
-  // that answer an unauthenticated caller with their own uniform response
-  // instead of `unauthorized`.
+  // Reports the same session check without rejecting, for routes that answer an
+  // unauthenticated caller with their own uniform response instead of
+  // `unauthorized`.
   app.decorate(
     'hasAdministrationAuthentication',
-    (request: FastifyRequest): boolean =>
-      acceptAdministrationBearer(request) ||
-      acceptAdministrationSession(request),
+    (request: FastifyRequest): boolean => acceptAdministrationSession(request),
   );
 
-  app.decorate('requireAdministrationBearerToken', (async (request, reply) => {
-    if (!acceptAdministrationBearer(request)) {
-      reject(request, reply, 'administration');
-    }
-  }) satisfies onRequestHookHandler);
+  app.decorate(
+    'guardAdministrationAttempt',
+    (request: FastifyRequest, reply: Parameters<onRequestHookHandler>[1]) => {
+      enforceLimit(
+        request,
+        reply,
+        'administration',
+        options.failureLimiter.check(request.ip),
+      );
+    },
+  );
+
+  app.decorate(
+    'rejectAdministrationAttempt',
+    (
+      request,
+      reply,
+      message = 'A valid administration session is required',
+      code: 'forbidden' | 'unauthorized' = 'unauthorized',
+    ) => reject(request, reply, 'administration', message, code),
+  );
 
   app.decorate('requireAdministrationSession', (async (request, reply) => {
     if (!acceptAdministrationSession(request)) {
-      reject(request, reply, 'administration');
-    }
-  }) satisfies onRequestHookHandler);
-
-  app.decorate('requireAdministrationToken', (async (request, reply) => {
-    if (
-      !acceptAdministrationBearer(request) &&
-      !acceptAdministrationSession(request)
-    ) {
-      reject(request, reply, 'administration');
+      reject(
+        request,
+        reply,
+        'administration',
+        'A valid administration session is required',
+      );
     }
   }) satisfies onRequestHookHandler);
 
@@ -193,12 +217,16 @@ export const registerAuthentication = (
 
     if (
       options.allowAdministrationUploads &&
-      (acceptAdministrationBearer(request) ||
-        acceptAdministrationSession(request))
+      acceptAdministrationSession(request)
     ) {
       return;
     }
 
-    reject(request, reply, 'ingestion');
+    reject(
+      request,
+      reply,
+      'ingestion',
+      'A valid ingestion bearer token is required',
+    );
   }) satisfies onRequestHookHandler);
 };

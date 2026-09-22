@@ -2,6 +2,10 @@ import {
   ADMIN_SESSION_CSRF_HEADER,
   ADMIN_SESSION_CSRF_VALUE,
   API_ROUTES,
+  adminAuthStatusSchema,
+  adminPasswordRemovalInputSchema,
+  adminPasswordUpdateInputSchema,
+  adminSessionRequestSchema,
   adminSessionSchema,
   apiErrorBodySchema,
   gallerySettingsSchema,
@@ -20,6 +24,9 @@ import {
   telegramContributorUpdateInputSchema,
   telegramUserIdSchema,
   type ApiErrorBody,
+  type AdminAuthStatus,
+  type AdminPasswordRemovalInput,
+  type AdminPasswordUpdateInput,
   type AdminSession,
   type GallerySettings,
   type GallerySettingsUpdateInput,
@@ -86,9 +93,13 @@ export class HomeGalleryResponseError extends Error {
 }
 
 export interface HomeGalleryClient {
-  createAdminSession(token: string): Promise<AdminSession>;
+  getAdminAuthStatus(): Promise<AdminAuthStatus>;
+  /** The password is omitted while the installation has none configured. */
+  createAdminSession(password?: string): Promise<AdminSession>;
   getAdminSession(): Promise<AdminSession>;
   deleteAdminSession(): Promise<void>;
+  setAdminPassword(input: AdminPasswordUpdateInput): Promise<void>;
+  removeAdminPassword(input: AdminPasswordRemovalInput): Promise<void>;
   getHealth(): Promise<HealthResponse>;
   uploadMedia(input: UploadMediaInput): Promise<MediaRecord>;
   listMedia(query?: MediaListQuery): Promise<MediaListResponse>;
@@ -176,7 +187,6 @@ export const createHomeGalleryClient = (
 
   interface RequestAuthentication {
     readonly authenticated?: boolean;
-    readonly bearerToken?: string;
     readonly csrf?: boolean;
     readonly session?: boolean;
   }
@@ -208,9 +218,7 @@ export const createHomeGalleryClient = (
       headers.set('accept', 'application/json');
     }
 
-    const requestToken =
-      authentication.bearerToken ??
-      (authentication.authenticated ? token : undefined);
+    const requestToken = authentication.authenticated ? token : undefined;
 
     if (requestToken !== undefined) {
       headers.set('authorization', `Bearer ${requestToken}`);
@@ -291,18 +299,24 @@ export const createHomeGalleryClient = (
   });
 
   return {
-    createAdminSession: (bootstrapToken) => {
-      const trimmedToken = bootstrapToken.trim();
+    getAdminAuthStatus: () =>
+      requestJson(
+        API_ROUTES.adminAuth,
+        adminAuthStatusSchema,
+        jsonInit('GET'),
+        {},
+      ),
 
-      if (trimmedToken.length === 0) {
-        throw new TypeError('Administration bearer token must not be empty');
-      }
+    createAdminSession: (password) => {
+      const parsedInput = adminSessionRequestSchema.parse(
+        password === undefined ? {} : { password },
+      );
 
       return requestJson(
         API_ROUTES.adminSession,
         adminSessionSchema,
-        jsonInit('POST'),
-        { bearerToken: trimmedToken, session: true },
+        jsonInit('POST', parsedInput),
+        { csrf: true, session: true },
       );
     },
 
@@ -316,6 +330,22 @@ export const createHomeGalleryClient = (
 
     deleteAdminSession: async () => {
       await request(API_ROUTES.adminSession, jsonInit('DELETE'), {
+        csrf: true,
+        session: true,
+      });
+    },
+
+    setAdminPassword: async (input) => {
+      const parsedInput = adminPasswordUpdateInputSchema.parse(input);
+      await request(API_ROUTES.adminPassword, jsonInit('PUT', parsedInput), {
+        csrf: true,
+        session: true,
+      });
+    },
+
+    removeAdminPassword: async (input) => {
+      const parsedInput = adminPasswordRemovalInputSchema.parse(input);
+      await request(API_ROUTES.adminPassword, jsonInit('DELETE', parsedInput), {
         csrf: true,
         session: true,
       });

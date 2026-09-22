@@ -20,8 +20,8 @@ describe('migrations', () => {
   });
 
   it('applies every migration on a fresh database', () => {
-    expect(migrate(database)).toEqual([1, 2, 3, 4]);
-    expect(LATEST_SCHEMA_VERSION).toBe(4);
+    expect(migrate(database)).toEqual([1, 2, 3, 4, 5]);
+    expect(LATEST_SCHEMA_VERSION).toBe(5);
   });
 
   it('is repeatable', () => {
@@ -34,7 +34,7 @@ describe('migrations', () => {
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
       .all() as { version: number }[];
 
-    expect(rows.map((row) => row.version)).toEqual([1, 2, 3, 4]);
+    expect(rows.map((row) => row.version)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('seeds deterministic default gallery settings', () => {

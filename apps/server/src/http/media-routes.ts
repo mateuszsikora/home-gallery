@@ -90,7 +90,7 @@ const listMedia = (
  * public playlist deliberately omits.
  */
 export const registerMediaRoutes = (app: FastifyInstance): void => {
-  const protectedRoute = { onRequest: app.requireAdministrationToken };
+  const protectedRoute = { onRequest: app.requireAdministrationSession };
 
   app.get<{ Querystring: Record<string, unknown> }>(
     API_ROUTES.media,

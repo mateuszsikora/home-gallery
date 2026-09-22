@@ -30,7 +30,7 @@ Out of scope:
 - absent rate limiting or hardening on a path where the documented configuration disables it deliberately;
 - dependency advisories with no demonstrated impact on this project; report those to the upstream project;
 - resource exhaustion on a host provisioned below the documented capacity guidance;
-- findings that presuppose an already-compromised host, a leaked administration token, or physical access.
+- findings that presuppose an already-compromised host, a leaked administration password or session cookie, or physical access.
 
 ## Credential handling
 

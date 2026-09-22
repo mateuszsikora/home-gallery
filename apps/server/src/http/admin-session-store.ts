@@ -75,6 +75,22 @@ export class AdminSessionStore {
     }
   }
 
+  /**
+   * Drops every session but the caller's own. Changing the password has to log
+   * out browsers that were opened under the previous one, while leaving the
+   * administrator who made the change signed in.
+   */
+  deleteOthers(token: string | undefined): void {
+    const retained =
+      token === undefined ? undefined : hashAdminSessionToken(token);
+
+    for (const key of this.#sessions.keys()) {
+      if (key !== retained) {
+        this.#sessions.delete(key);
+      }
+    }
+  }
+
   get size(): number {
     this.#prune(this.#now());
     return this.#sessions.size;

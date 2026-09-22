@@ -16,19 +16,22 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import {
+  adminMutationHeaders,
   createTemporaryDataDirectory,
+  createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
-  TEST_API_TOKEN,
 } from './helpers.js';
 
 describe('gallery settings routes', () => {
   let dataDirectory: string;
   let app: FastifyInstance;
+  let sessionCookie: string;
 
   beforeEach(async () => {
     dataDirectory = await createTemporaryDataDirectory();
     app = await createApp(createTestConfig(dataDirectory));
+    sessionCookie = await createTestAdminSession(app);
   });
 
   afterEach(async () => {
@@ -36,17 +39,15 @@ describe('gallery settings routes', () => {
     await removeTemporaryDataDirectory(dataDirectory);
   });
 
-  /** A `null` token sends no `Authorization` header at all. */
+  /** A `null` cookie sends no administration session at all. */
   const patchSettings = (
     payload: Record<string, unknown>,
-    token: string | null = TEST_API_TOKEN,
+    cookie: string | null = sessionCookie,
   ): Promise<LightMyRequestResponse> => {
     const options: InjectOptions = {
       method: 'PATCH',
       url: API_ROUTES.settings,
-      ...(token === null
-        ? {}
-        : { headers: { authorization: `Bearer ${token}` } }),
+      ...(cookie === null ? {} : { headers: adminMutationHeaders(cookie) }),
       payload,
     };
 
@@ -57,7 +58,7 @@ describe('gallery settings routes', () => {
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.settings,
-      headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
+      headers: { cookie: sessionCookie },
     });
 
     expect(response.statusCode).toBe(200);
@@ -143,7 +144,7 @@ describe('gallery settings routes', () => {
     expect(app.settingsRepository.read()).toEqual(DEFAULT_GALLERY_SETTINGS);
   });
 
-  it('requires a bearer token to read the settings', async () => {
+  it('requires an administration session to read the settings', async () => {
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.settings,
@@ -155,7 +156,7 @@ describe('gallery settings routes', () => {
     );
   });
 
-  it('requires a bearer token to update the settings', async () => {
+  it('requires an administration session to update the settings', async () => {
     const response = await patchSettings({ playbackMode: 'shuffle' }, null);
 
     expect(response.statusCode).toBe(401);

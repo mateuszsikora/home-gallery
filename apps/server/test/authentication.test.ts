@@ -6,16 +6,16 @@ import { createApp } from '../src/app.js';
 import { secretsMatch } from '../src/http/authentication.js';
 import {
   createTemporaryDataDirectory,
+  createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
-  TEST_API_TOKEN,
   TEST_INGESTION_TOKEN,
 } from './helpers.js';
 
 const ADMIN_ROUTE = '/test/admin';
 const INGESTION_ROUTE = '/test/ingestion';
 
-describe('scoped bearer token guards', () => {
+describe('scoped credential guards', () => {
   let dataDirectory: string;
   let app: FastifyInstance;
 
@@ -24,7 +24,7 @@ describe('scoped bearer token guards', () => {
     app = await createApp(createTestConfig(dataDirectory));
     app.get(
       ADMIN_ROUTE,
-      { onRequest: app.requireAdministrationToken },
+      { onRequest: app.requireAdministrationSession },
       async () => ({ ok: true }),
     );
     app.get(
@@ -39,32 +39,56 @@ describe('scoped bearer token guards', () => {
     await removeTemporaryDataDirectory(dataDirectory);
   });
 
-  const request = (route: string, authorization?: string) =>
-    app.inject({
-      method: 'GET',
-      url: route,
-      ...(authorization === undefined ? {} : { headers: { authorization } }),
-    });
-
   it('accepts each credential only for its configured scope', async () => {
+    const sessionCookie = await createTestAdminSession(app);
+
     expect(
-      (await request(ADMIN_ROUTE, `Bearer ${TEST_API_TOKEN}`)).statusCode,
+      (
+        await app.inject({
+          method: 'GET',
+          url: ADMIN_ROUTE,
+          headers: { cookie: sessionCookie },
+        })
+      ).statusCode,
     ).toBe(200);
     expect(
-      (await request(INGESTION_ROUTE, `Bearer ${TEST_INGESTION_TOKEN}`))
-        .statusCode,
+      (
+        await app.inject({
+          method: 'GET',
+          url: INGESTION_ROUTE,
+          headers: { authorization: `Bearer ${TEST_INGESTION_TOKEN}` },
+        })
+      ).statusCode,
     ).toBe(200);
     expect(
-      (await request(ADMIN_ROUTE, `Bearer ${TEST_INGESTION_TOKEN}`)).statusCode,
+      (
+        await app.inject({
+          method: 'GET',
+          url: ADMIN_ROUTE,
+          headers: { authorization: `Bearer ${TEST_INGESTION_TOKEN}` },
+        })
+      ).statusCode,
     ).toBe(401);
     expect(
-      (await request(INGESTION_ROUTE, `Bearer ${TEST_API_TOKEN}`)).statusCode,
+      (
+        await app.inject({
+          method: 'GET',
+          url: INGESTION_ROUTE,
+          headers: { cookie: sessionCookie },
+        })
+      ).statusCode,
     ).toBe(401);
   });
 
-  it('accepts a lowercase scheme', async () => {
+  it('accepts a lowercase ingestion scheme', async () => {
     expect(
-      (await request(ADMIN_ROUTE, `bearer ${TEST_API_TOKEN}`)).statusCode,
+      (
+        await app.inject({
+          method: 'GET',
+          url: INGESTION_ROUTE,
+          headers: { authorization: `bearer ${TEST_INGESTION_TOKEN}` },
+        })
+      ).statusCode,
     ).toBe(200);
   });
 
@@ -74,10 +98,14 @@ describe('scoped bearer token guards', () => {
     ['a scheme without a token', 'Bearer'],
     ['another scheme', 'Basic dXNlcjpwYXNz'],
     ['a wrong token', 'Bearer wrong-token-0123456789abcdef0123456789'],
-    ['a token prefix', `Bearer ${TEST_API_TOKEN.slice(0, -1)}`],
-    ['a token with extra characters', `Bearer ${TEST_API_TOKEN}x`],
-  ])('rejects %s', async (_label, authorization) => {
-    const response = await request(ADMIN_ROUTE, authorization);
+    ['a token prefix', `Bearer ${TEST_INGESTION_TOKEN.slice(0, -1)}`],
+    ['a token with extra characters', `Bearer ${TEST_INGESTION_TOKEN}x`],
+  ])('rejects ingestion with %s', async (_label, authorization) => {
+    const response = await app.inject({
+      method: 'GET',
+      url: INGESTION_ROUTE,
+      ...(authorization === undefined ? {} : { headers: { authorization } }),
+    });
 
     expect(response.statusCode).toBe(401);
     expect(response.headers['www-authenticate']).toBe('Bearer');
@@ -85,13 +113,26 @@ describe('scoped bearer token guards', () => {
     const body = apiErrorBodySchema.parse(response.json());
 
     expect(body.error.code).toBe('unauthorized');
-    expect(body.error.message).not.toContain(TEST_API_TOKEN);
+    expect(body.error.message).not.toContain(TEST_INGESTION_TOKEN);
   });
 
-  it('never echoes either expected token', async () => {
-    const response = await request(ADMIN_ROUTE, 'Bearer nope');
+  it('rejects an unknown session cookie', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: ADMIN_ROUTE,
+      headers: { cookie: 'home_gallery_admin_session=not-a-real-session' },
+    });
 
-    expect(response.body).not.toContain(TEST_API_TOKEN);
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('never echoes the expected ingestion token', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: INGESTION_ROUTE,
+      headers: { authorization: 'Bearer nope' },
+    });
+
     expect(response.body).not.toContain(TEST_INGESTION_TOKEN);
   });
 });
@@ -107,19 +148,12 @@ describe('credential rotation and rate limiting', () => {
     await removeTemporaryDataDirectory(dataDirectory);
   });
 
-  it('accepts previous credentials only in their original scope', async () => {
-    const previousAdmin = 'previous-admin-token-0123456789abcdef012345';
+  it('accepts a previous ingestion token', async () => {
     const previousIngestion = 'previous-ingestion-token-0123456789abcdef0123';
     const app = await createApp(
       createTestConfig(dataDirectory, {
-        administrationTokens: [TEST_API_TOKEN, previousAdmin],
         ingestionTokens: [TEST_INGESTION_TOKEN, previousIngestion],
       }),
-    );
-    app.get(
-      ADMIN_ROUTE,
-      { onRequest: app.requireAdministrationToken },
-      async () => ({ ok: true }),
     );
     app.get(
       INGESTION_ROUTE,
@@ -132,35 +166,17 @@ describe('credential rotation and rate limiting', () => {
         (
           await app.inject({
             method: 'GET',
-            url: ADMIN_ROUTE,
-            headers: { authorization: `Bearer ${previousAdmin}` },
-          })
-        ).statusCode,
-      ).toBe(200);
-      expect(
-        (
-          await app.inject({
-            method: 'GET',
             url: INGESTION_ROUTE,
             headers: { authorization: `Bearer ${previousIngestion}` },
           })
         ).statusCode,
       ).toBe(200);
-      expect(
-        (
-          await app.inject({
-            method: 'GET',
-            url: ADMIN_ROUTE,
-            headers: { authorization: `Bearer ${previousIngestion}` },
-          })
-        ).statusCode,
-      ).toBe(401);
     } finally {
       await app.close();
     }
   });
 
-  it('allows administration credentials on ingestion only when opted in', async () => {
+  it('allows an administration session on ingestion only when opted in', async () => {
     const app = await createApp(
       createTestConfig(dataDirectory, { allowAdministrationUploads: true }),
     );
@@ -174,7 +190,7 @@ describe('credential rotation and rate limiting', () => {
       const response = await app.inject({
         method: 'GET',
         url: INGESTION_ROUTE,
-        headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
+        headers: { cookie: await createTestAdminSession(app) },
       });
 
       expect(response.statusCode).toBe(200);
@@ -191,16 +207,17 @@ describe('credential rotation and rate limiting', () => {
     );
     app.get(
       ADMIN_ROUTE,
-      { onRequest: app.requireAdministrationToken },
+      { onRequest: app.requireAdministrationSession },
       async () => ({ ok: true }),
     );
 
     try {
+      const sessionCookie = await createTestAdminSession(app);
       const invalidRequest = () =>
         app.inject({
           method: 'GET',
           url: ADMIN_ROUTE,
-          headers: { authorization: 'Bearer definitely-wrong' },
+          headers: { cookie: 'home_gallery_admin_session=definitely-wrong' },
         });
 
       expect((await invalidRequest()).statusCode).toBe(401);
@@ -218,7 +235,7 @@ describe('credential rotation and rate limiting', () => {
           await app.inject({
             method: 'GET',
             url: ADMIN_ROUTE,
-            headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
+            headers: { cookie: sessionCookie },
           })
         ).statusCode,
       ).toBe(200);

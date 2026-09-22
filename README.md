@@ -46,7 +46,6 @@ The server reads its configuration from the environment and refuses to start whe
 
 ```bash
 npm run build
-HOME_GALLERY_ADMIN_TOKEN="$(openssl rand -hex 32)" \
 HOME_GALLERY_INGESTION_TOKEN="$(openssl rand -hex 32)" \
 HOME_GALLERY_DATA_DIR=./data \
 npm run start --workspace @home-gallery/server
@@ -67,7 +66,11 @@ Open the Vite URL shown in the terminal. The API URL defaults to the gallery pag
 
 ### Running the administration application
 
-The administration application manages the media library, the playback settings, and the Telegram contributors who may submit photos. It uses the same API URL and asks for the administration bearer token once to create a short-lived server session. The token is never put in browser storage or a URL; subsequent requests use an opaque `HttpOnly`, `SameSite=Strict` cookie and an explicit anti-CSRF header for mutations. The in-memory session expires after eight hours by default, is invalidated by a server restart or the **Lock studio** action, and uses `Secure` automatically in the supported TLS profile. Administration uploads are disabled by default; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
+The administration application manages the media library, the playback settings, the Telegram contributors who may submit photos, and the password that protects the studio itself.
+
+A fresh installation has **no administration password**: the studio opens for anyone who can reach it, and says so on every screen until a password is set from its **Security** panel. Setting, changing, or removing the password signs out every other browser and keeps the one making the change signed in. Run the gallery on a trusted network, and set a password before the server is reachable from anywhere else.
+
+The administration application uses the same API URL and asks for the password once to create a short-lived server session. The password is never put in browser storage or a URL; subsequent requests use an opaque `HttpOnly`, `SameSite=Strict` cookie and an explicit anti-CSRF header for mutations. The in-memory session expires after eight hours by default, is invalidated by a server restart or the **Lock studio** action, and uses `Secure` automatically in the supported TLS profile. Administration uploads are disabled by default; set `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` deliberately when browser uploads are required.
 
 ```bash
 VITE_HOME_GALLERY_API_URL=http://localhost:3012 \
