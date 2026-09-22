@@ -12,7 +12,7 @@ Production images, Docker Compose deployment, backup and restore, and rollback a
 
 Home Gallery is a personal project published so others can read, fork, and adapt it. It is maintained on a best-effort basis: issues and pull requests are welcome, but there is no support commitment or release schedule. Run it on a trusted network and review [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
 
-The container images referenced by `docker-compose.yml` are published to a private GHCR namespace. Unless you have access to those packages, build them locally instead of pulling:
+The container images referenced by `docker-compose.yml` are published as public GHCR packages, so `docker compose pull` works without a registry login. To build them from source instead:
 
 ```bash
 docker compose --env-file .env build

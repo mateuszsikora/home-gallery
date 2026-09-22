@@ -9,8 +9,7 @@ The production host needs:
 - 64-bit Linux on `amd64`;
 - Docker Engine with Docker Compose v2 and support for `docker compose up --wait`;
 - enough persistent disk for the media library, a local backup, and temporary restore space;
-- outbound HTTPS access to GHCR and the Telegram Bot API;
-- an SSH user allowed to run Docker when automated deployment is enabled.
+- outbound HTTPS access to GHCR and the Telegram Bot API.
 
 This guide writes the deployment host as `HOST` (an IP address or DNS name on your LAN); substitute your own value. When the host already runs other Compose projects, Home Gallery stays isolated from them: it never joins another project's network, mounts its volumes, addresses its containers, or runs `--remove-orphans`. The default host ports `3010` through `3012` are chosen to avoid the common `3000`–`3003` range and are configurable in `.env`.
 
@@ -35,10 +34,9 @@ Replace every placeholder in `.env`:
 
 Each application credential must be at least 32 characters with no whitespace. The administration token manages media and settings. The ingestion token can only upload media and is used by the Telegram bot. Keep `.env`, backups, databases, uploaded media, and Caddy certificate storage out of source control.
 
-Log in to the private GitHub Container Registry package, then deploy:
+The GHCR packages are public, so the host needs no registry login. Deploy:
 
 ```bash
-docker login ghcr.io -u <github-user>
 bash deploy.sh
 ```
 
@@ -293,6 +291,6 @@ Routine checks should cover:
 - **The server cannot write data:** inspect volume ownership and confirm the container still runs as UID/GID `1000`.
 - **The bot exits:** validate the BotFather token and the ingestion credential, then inspect bot logs.
 - **A contributor is stuck waiting:** confirm their request is listed under **Contributors** in the administration application and approve it there; the bot reports every contact it could not register.
-- **An image pull is denied:** refresh `docker login ghcr.io` with an account or token allowed to read the private packages.
+- **An image pull fails:** the packages are public and need no login, so confirm the host's outbound HTTPS access to `ghcr.io` and that the requested `HOME_GALLERY_IMAGE_TAG` exists.
 - **A deployment fails:** leave any other Compose project untouched, inspect `docker compose --project-name home-gallery ... ps --all`, correct the cause, and rerun `deploy.sh`.
 - **A restore fails health checks:** inspect server logs, keep the automatically generated pre-restore archive, and restore the last known-good archive.
