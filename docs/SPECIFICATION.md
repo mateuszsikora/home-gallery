@@ -144,7 +144,6 @@ The first release supports receiving photos from Telegram, local media storage, 
 - scheduled and multiple playlists;
 - multiple displays;
 - a moderation workflow;
-- thumbnail generation;
 - WebSocket or SSE live updates;
 - additional transition effects;
 - additional media sources.

@@ -42,7 +42,7 @@ export type AdminClient = Pick<
   | 'deleteAdminSession'
   | 'deleteMedia'
   | 'getAdminAuthStatus'
-  | 'getAdminMediaContentUrl'
+  | 'getAdminMediaThumbnailUrl'
   | 'getAdminSession'
   | 'getSettings'
   | 'listMedia'
@@ -1035,7 +1035,9 @@ export const AdminApp = ({
                                       new Set(failures).add(item.id),
                                     );
                                   }}
-                                  src={client.getAdminMediaContentUrl(item.id)}
+                                  src={client.getAdminMediaThumbnailUrl(
+                                    item.id,
+                                  )}
                                   width={item.width}
                                 />
                               )}

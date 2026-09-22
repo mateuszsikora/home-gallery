@@ -110,6 +110,7 @@ export interface HomeGalleryClient {
   getMediaContent(id: MediaId): Promise<Blob>;
   getMediaContentUrl(id: MediaId): string;
   getAdminMediaContentUrl(id: MediaId): string;
+  getAdminMediaThumbnailUrl(id: MediaId): string;
   getSettings(): Promise<GallerySettings>;
   updateSettings(input: GallerySettingsUpdateInput): Promise<GallerySettings>;
   registerTelegramContributor(
@@ -446,6 +447,13 @@ export const createHomeGalleryClient = (
     getAdminMediaContentUrl: (id) => {
       const parsedId = mediaIdSchema.parse(id);
       return buildUrl(API_ROUTES.adminMediaContentById(parsedId)).toString();
+    },
+
+    // The administration list shows one card per photo, so it asks for the
+    // small derivative instead of the full normalized image.
+    getAdminMediaThumbnailUrl: (id) => {
+      const parsedId = mediaIdSchema.parse(id);
+      return buildUrl(API_ROUTES.adminMediaThumbnailById(parsedId)).toString();
     },
 
     getSettings: () =>

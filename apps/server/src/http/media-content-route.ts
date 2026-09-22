@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import { IMMUTABLE_CACHE_CONTROL, NO_STORE_CACHE_CONTROL } from './cache.js';
 import { ApiError } from './errors.js';
+import { thumbnailFilename } from '../media/thumbnails.js';
 import type { OpenMediaFile } from '../storage/media-storage.js';
 
 /** Fastify parameter form of `API_ROUTES.mediaContentById`. */
@@ -14,6 +15,9 @@ const MEDIA_CONTENT_ROUTE = '/media/:id';
 
 /** Fastify parameter form of `API_ROUTES.adminMediaContentById`. */
 const ADMIN_MEDIA_CONTENT_ROUTE = `${API_ROUTES.media}/:id/content`;
+
+/** Fastify parameter form of `API_ROUTES.adminMediaThumbnailById`. */
+const ADMIN_MEDIA_THUMBNAIL_ROUTE = `${API_ROUTES.media}/:id/thumbnail`;
 
 /**
  * Both content routes report every failure the same way, so no caller can tell
@@ -26,15 +30,15 @@ const unavailable = (): ApiError =>
 type ContentRequest = FastifyRequest<{ Params: { id: string } }>;
 
 /**
- * Resolves the record and its bytes. `allowDisabled` is the only difference
+ * Resolves the record a request asks for. `allowDisabled` is the only difference
  * between the public and the administrative route: the administration app
  * manages hidden photos, so it must be able to look at them.
  */
-const openMedia = async (
+const requireRecord = (
   app: FastifyInstance,
   request: ContentRequest,
   allowDisabled: boolean,
-): Promise<{ record: MediaRecord; file: OpenMediaFile }> => {
+): MediaRecord => {
   const parsedId = mediaIdSchema.safeParse(request.params.id);
   const record = parsedId.success
     ? app.mediaRepository.findById(parsedId.data)
@@ -44,6 +48,15 @@ const openMedia = async (
     throw unavailable();
   }
 
+  return record;
+};
+
+/** Opens the normalized image, which every record is required to have. */
+const openStoredImage = async (
+  app: FastifyInstance,
+  request: ContentRequest,
+  record: MediaRecord,
+): Promise<OpenMediaFile> => {
   const file = await app.mediaStorage.openForRead(record.storedFilename);
 
   if (file === undefined) {
@@ -54,7 +67,7 @@ const openMedia = async (
     throw unavailable();
   }
 
-  return { record, file };
+  return file;
 };
 
 /**
@@ -66,7 +79,8 @@ export const registerMediaContentRoute = (app: FastifyInstance): void => {
   app.get<{ Params: { id: string } }>(
     MEDIA_CONTENT_ROUTE,
     async (request, reply) => {
-      const { record, file } = await openMedia(app, request, false);
+      const record = requireRecord(app, request, false);
+      const file = await openStoredImage(app, request, record);
 
       // The identifier is enough to validate a cached copy because normalized
       // bytes never change once they are stored.
@@ -105,7 +119,43 @@ export const registerAdminMediaContentRoute = (app: FastifyInstance): void => {
         throw unavailable();
       }
 
-      const { record, file } = await openMedia(app, request, true);
+      const record = requireRecord(app, request, true);
+      const file = await openStoredImage(app, request, record);
+
+      return reply
+        .header('cache-control', NO_STORE_CACHE_CONTROL)
+        .header('content-length', file.size)
+        .type(record.mimeType)
+        .send(file.stream);
+    },
+  );
+};
+
+/**
+ * The administration preview route. It answers with the small derivative stored
+ * next to the normalized image, so listing a whole library transfers bytes
+ * proportional to what a card can show rather than to the camera's resolution.
+ *
+ * The derivative is written after the upload and backfilled at startup, so it
+ * can legitimately be absent; the full image is served in its place instead of
+ * failing the card. Authentication, visibility, and caching behave exactly like
+ * the administrative content route.
+ */
+export const registerAdminMediaThumbnailRoute = (
+  app: FastifyInstance,
+): void => {
+  app.get<{ Params: { id: string } }>(
+    ADMIN_MEDIA_THUMBNAIL_ROUTE,
+    async (request, reply) => {
+      if (!app.hasAdministrationAuthentication(request)) {
+        throw unavailable();
+      }
+
+      const record = requireRecord(app, request, true);
+      const file =
+        (await app.mediaStorage.openForRead(
+          thumbnailFilename(record.storedFilename),
+        )) ?? (await openStoredImage(app, request, record));
 
       return reply
         .header('cache-control', NO_STORE_CACHE_CONTROL)

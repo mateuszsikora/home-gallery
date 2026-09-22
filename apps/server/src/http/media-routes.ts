@@ -11,6 +11,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 
 import { InvalidCursorError } from '../database/media-repository.js';
+import { thumbnailFilename } from '../media/thumbnails.js';
 import { NO_STORE_CACHE_CONTROL } from './cache.js';
 import { ApiError } from './errors.js';
 
@@ -164,6 +165,17 @@ export const registerMediaRoutes = (app: FastifyInstance): void => {
         request.log.warn(
           { err: error, mediaId: record.id },
           'Deleted media left a temporary file for startup cleanup',
+        );
+      }
+
+      // The preview derivative is unreachable once the row is gone, so it is
+      // removed after the deletion rather than staged alongside it.
+      try {
+        await app.mediaStorage.remove(thumbnailFilename(record.storedFilename));
+      } catch (error) {
+        request.log.warn(
+          { err: error, mediaId: record.id },
+          'Deleted media left its administration thumbnail behind',
         );
       }
 

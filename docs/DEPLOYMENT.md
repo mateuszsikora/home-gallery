@@ -268,6 +268,8 @@ bash deploy.sh
 
 Always take a backup before upgrading. A future release may include a database migration that older application code cannot read. In that case, restore the backup made immediately before the upgrade as well as pinning the older image tag.
 
+The first start after upgrading past the release that introduced administration previews generates a preview derivative for every photograph already stored. The pass runs in the background, one photograph at a time, so the server answers requests throughout it and logs `Administration thumbnail backfill finished` when it is done. Until a photograph has its derivative, its administration card loads the full image as before. An interrupted pass resumes on the next start.
+
 ## Continuous integration
 
 On every successful push to `main`, CI:
@@ -281,7 +283,7 @@ CI does not deliver those images to a host. Deployment is a separate, operator-d
 
 ## Capacity and routine operations
 
-Normalized images are often smaller than camera originals, but capacity depends heavily on resolution and content. Establish a baseline after importing a representative batch:
+Each photo occupies two files: the normalized WebP image the gallery plays, and a preview derivative of at most 480 pixels on its longest edge that the administration panel lists. Normalized images are often smaller than camera originals, but capacity depends heavily on resolution and content; the derivative adds roughly 20–60 KB per photo, which is a small fraction of the image it belongs to. `HOME_GALLERY_MAX_STORED_FILES` counts photographs rather than files on disk, so the limit still means the same number of photographs after this addition. Establish a baseline after importing a representative batch:
 
 ```bash
 docker system df -v

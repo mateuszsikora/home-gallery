@@ -34,6 +34,7 @@ import { registerErrorHandling } from './http/errors.js';
 import { registerHealthRoute } from './http/health-route.js';
 import {
   registerAdminMediaContentRoute,
+  registerAdminMediaThumbnailRoute,
   registerMediaContentRoute,
 } from './http/media-content-route.js';
 import { registerMediaRoutes } from './http/media-routes.js';
@@ -42,6 +43,10 @@ import { registerPlaylistRoute } from './http/playlist-route.js';
 import { FixedWindowRateLimiter } from './http/rate-limit.js';
 import { registerSettingsRoutes } from './http/settings-routes.js';
 import { registerTelegramContributorRoutes } from './http/telegram-contributor-routes.js';
+import {
+  startThumbnailBackfill,
+  type ThumbnailBackfill,
+} from './media/thumbnail-backfill.js';
 import {
   createMediaStorage,
   type MediaStorage,
@@ -55,6 +60,8 @@ declare module 'fastify' {
     settingsRepository: SettingsRepository;
     telegramContributorRepository: TelegramContributorRepository;
     mediaStorage: MediaStorage;
+    /** The background pass that gives older media its preview derivative. */
+    thumbnailBackfill: ThumbnailBackfill;
   }
 }
 
@@ -109,10 +116,6 @@ export const createApp = async (
           censor: '[redacted]',
         },
       },
-    });
-
-    app.addHook('onClose', async () => {
-      database.close();
     });
 
     app.decorate('config', config);
@@ -191,9 +194,31 @@ export const createApp = async (
     registerMediaRoutes(app);
     registerMediaContentRoute(app);
     registerAdminMediaContentRoute(app);
+    registerAdminMediaThumbnailRoute(app);
     registerPlaylistRoute(app);
     registerSettingsRoutes(app);
     registerTelegramContributorRoutes(app);
+
+    const thumbnailBackfill = startThumbnailBackfill({
+      log: app.log,
+      mediaRepository: app.mediaRepository,
+      mediaStorage: storage,
+    });
+    app.decorate('thumbnailBackfill', thumbnailBackfill);
+
+    // The backfill reads the database, so it has to stop before the connection
+    // closes; that is why closing the connection lives in this hook.
+    app.addHook('onClose', async () => {
+      thumbnailBackfill.stop();
+      await thumbnailBackfill.finished;
+      database.close();
+    });
+
+    void thumbnailBackfill.finished.then((result) => {
+      if (result.created > 0 || result.failed > 0 || result.stopped) {
+        app.log.info(result, 'Administration thumbnail backfill finished');
+      }
+    });
 
     app.log.info(
       {

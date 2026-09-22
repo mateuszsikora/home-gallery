@@ -1,14 +1,19 @@
+import { writeFile } from 'node:fs/promises';
+
 import { API_ROUTES, apiErrorBodySchema } from '@home-gallery/shared-types';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
+import type { CreateMediaInput } from '../src/database/media-repository.js';
 import { ADMIN_SESSION_COOKIE_NAME } from '../src/http/admin-session-routes.js';
+import { thumbnailFilename } from '../src/media/thumbnails.js';
 import {
   createTemporaryDataDirectory,
   createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
+  storeTestImage,
   storeTestMedia,
 } from './helpers.js';
 
@@ -207,6 +212,136 @@ describe('GET /api/media/{id}/content', () => {
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.adminMediaContentById(record.id),
+      headers: { cookie: await createTestAdminSession(app) },
+    });
+
+    expectUnavailable(response.statusCode, response.json());
+  });
+});
+
+describe('GET /api/media/{id}/thumbnail', () => {
+  let dataDirectory: string;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    dataDirectory = await createTemporaryDataDirectory();
+    app = await createApp(createTestConfig(dataDirectory));
+    await app.thumbnailBackfill.finished;
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await removeTemporaryDataDirectory(dataDirectory);
+  });
+
+  const expectUnavailable = (statusCode: number, body: unknown) => {
+    expect(statusCode).toBe(404);
+    expect(apiErrorBodySchema.parse(body).error).toEqual({
+      code: 'not_found',
+      message: 'The requested media is not available',
+    });
+  };
+
+  /** The state a completed upload leaves behind: an image and its derivative. */
+  const storeWithThumbnail = async (
+    overrides: Partial<CreateMediaInput> = {},
+  ) => {
+    const stored = await storeTestImage(app, overrides);
+    const thumbnail = Buffer.from(
+      `thumbnail-of-${stored.record.storedFilename}`,
+    );
+    await writeFile(
+      app.mediaStorage.resolveMediaPath(
+        thumbnailFilename(stored.record.storedFilename),
+      ),
+      thumbnail,
+    );
+
+    return { ...stored, thumbnail };
+  };
+
+  it('serves the derivative instead of the full image and forbids storing it', async () => {
+    const { record, thumbnail } = await storeWithThumbnail();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { cookie: await createTestAdminSession(app) },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toBe('image/webp');
+    expect(response.headers['content-length']).toBe(
+      String(thumbnail.byteLength),
+    );
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.rawPayload.equals(thumbnail)).toBe(true);
+  });
+
+  it('previews a hidden photo the same way', async () => {
+    const { record, thumbnail } = await storeWithThumbnail({ enabled: false });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { cookie: await createTestAdminSession(app) },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.rawPayload.equals(thumbnail)).toBe(true);
+  });
+
+  it('falls back to the full image while the derivative is missing', async () => {
+    const { record, bytes } = await storeTestImage(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { cookie: await createTestAdminSession(app) },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.rawPayload.equals(bytes)).toBe(true);
+  });
+
+  it('answers an unauthenticated caller exactly like an unknown identifier', async () => {
+    const { record } = await storeWithThumbnail({ enabled: false });
+
+    const anonymous = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+    });
+    const unknown = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(UNKNOWN_ID),
+      headers: { cookie: await createTestAdminSession(app) },
+    });
+
+    expectUnavailable(anonymous.statusCode, anonymous.json());
+    expectUnavailable(unknown.statusCode, unknown.json());
+  });
+
+  it('rejects an invalid session cookie', async () => {
+    const { record } = await storeWithThumbnail();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { cookie: `${ADMIN_SESSION_COOKIE_NAME}=not-a-session` },
+    });
+
+    expectUnavailable(response.statusCode, response.json());
+  });
+
+  it('reports a record without either file as unavailable', async () => {
+    const { record } = await storeTestImage(app);
+    await app.mediaStorage.remove(record.storedFilename);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
       headers: { cookie: await createTestAdminSession(app) },
     });
 
