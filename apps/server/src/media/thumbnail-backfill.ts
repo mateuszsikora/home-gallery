@@ -9,6 +9,14 @@ import { createThumbnail, thumbnailFilename } from './thumbnails.js';
 const BACKFILL_PAGE_SIZE = 100;
 
 /**
+ * How long `stop` waits for the record in flight to wind down. A downscale
+ * cannot be cancelled, and the whole shutdown budget is ten seconds, so the pass
+ * is abandoned rather than allowed to spend it. Its temporary file is then left
+ * for the startup cleanup that already removes interrupted uploads.
+ */
+const STOP_GRACE_PERIOD_MS = 2_000;
+
+/**
  * A full volume or an unwritable media directory fails every record, so the pass
  * gives up instead of logging a line per photograph. A genuinely unreadable
  * image is rare enough that this many in a row means the storage, not the file.
@@ -29,7 +37,13 @@ export interface ThumbnailBackfillResult {
 export interface ThumbnailBackfill {
   /** Resolves once every record was visited or the pass was stopped. */
   readonly finished: Promise<ThumbnailBackfillResult>;
-  stop(): void;
+  /**
+   * Asks the pass to stop and resolves once it has wound down, or once a short
+   * grace period expires. The pass reads no database after this is called, so
+   * the caller may close the connection as soon as this resolves even if the
+   * record in flight is still encoding.
+   */
+  stop(): Promise<void>;
 }
 
 export interface ThumbnailBackfillOptions {
@@ -74,7 +88,9 @@ export const startThumbnailBackfill = (
       return 'skipped';
     }
 
-    if (mediaRepository.findById(target.id) === undefined) {
+    // Re-checked after that await: an encode started now could not finish before
+    // the grace period, and reading the record is what `stop` promises not to do.
+    if (stopRequested || mediaRepository.findById(target.id) === undefined) {
       return 'skipped';
     }
 
@@ -101,8 +117,11 @@ export const startThumbnailBackfill = (
     }
 
     // A photo deleted while its thumbnail was being written would otherwise
-    // leave a derivative behind that nothing points at and nothing cleans.
-    if (mediaRepository.findById(target.id) === undefined) {
+    // leave a derivative behind that nothing points at and nothing cleans. The
+    // encode above is the one step that can outlast the grace period, so this
+    // read is skipped once stopped: nothing deletes a photo while the server is
+    // closing, and the connection may already be gone.
+    if (!stopRequested && mediaRepository.findById(target.id) === undefined) {
       await mediaStorage.remove(filename);
       return 'skipped';
     }
@@ -147,20 +166,28 @@ export const startThumbnailBackfill = (
 
       const outcome = await ensureThumbnail(target);
 
-      if (outcome === 'created') {
-        created += 1;
-        consecutiveFailures = 0;
-      } else if (outcome === 'failed') {
-        failed += 1;
-        consecutiveFailures += 1;
-
-        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          log.error(
-            { failed },
-            'Giving up on administration thumbnails after repeated failures',
-          );
-          return true;
+      // Any outcome that is not a failure breaks the run, skips included: after
+      // the first pass every healthy record is a skip, so counting only
+      // creations would turn the threshold into "ten bad files in the whole
+      // library, however far apart" and abandon it at the same point forever.
+      if (outcome !== 'failed') {
+        if (outcome === 'created') {
+          created += 1;
         }
+
+        consecutiveFailures = 0;
+        continue;
+      }
+
+      failed += 1;
+      consecutiveFailures += 1;
+
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        log.error(
+          { failed },
+          'Giving up on administration thumbnails after repeated failures',
+        );
+        return true;
       }
     }
 
@@ -178,8 +205,23 @@ export const startThumbnailBackfill = (
 
   return {
     finished,
-    stop: () => {
+
+    stop: async () => {
       stopRequested = true;
+
+      await new Promise<void>((resolve) => {
+        const grace = setTimeout(() => {
+          resolve();
+        }, STOP_GRACE_PERIOD_MS);
+        // A pass that has already finished must not hold the process open for
+        // the rest of the grace period.
+        grace.unref();
+
+        void finished.then(() => {
+          clearTimeout(grace);
+          resolve();
+        });
+      });
     },
   };
 };

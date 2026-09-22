@@ -1,9 +1,9 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 import { API_ROUTES } from '@home-gallery/shared-types';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import { startThumbnailBackfill } from '../src/media/thumbnail-backfill.js';
@@ -112,6 +112,34 @@ describe('administration thumbnail backfill', () => {
     });
   });
 
+  it('keeps going when bad files are spread through a healthy library', async () => {
+    // Skips are the steady state once the first pass has run, so a threshold
+    // that only reset on a creation would read eleven failures however far apart
+    // as a broken volume and abandon the library at the same record on every
+    // restart. No two failures here are adjacent.
+    for (let index = 0; index < 11; index += 1) {
+      await storeTestMedia(app);
+      const settled = await storeTestMedia(app);
+      await writeFile(
+        app.mediaStorage.resolveMediaPath(
+          thumbnailFilename(settled.record.storedFilename),
+        ),
+        'an existing derivative',
+      );
+    }
+
+    const tail = await storeTestImage(app);
+
+    await expect(backfill().finished).resolves.toEqual({
+      created: 1,
+      failed: 11,
+      stopped: false,
+    });
+    await expect(
+      app.mediaStorage.exists(thumbnailFilename(tail.record.storedFilename)),
+    ).resolves.toBe(true);
+  });
+
   it('skips a record deleted after the pass listed the library', async () => {
     const { record } = await storeTestImage(app);
     const survivor = await storeTestImage(app);
@@ -141,26 +169,53 @@ describe('administration thumbnail backfill', () => {
     expect(await app.mediaStorage.pruneTemporaryFiles()).toBe(0);
   });
 
-  it('stops before finishing the library when shutdown asks it to', async () => {
+  it('starts no further work once shutdown asks it to stop', async () => {
     const first = await storeTestImage(app);
     const second = await storeTestImage(app);
 
     const pass = backfill();
-    pass.stop();
+    await pass.stop();
 
-    // The record already in flight is finished, so no half-written derivative
-    // is left for the next pass to trust.
+    // Not one downscale was started. A record whose turn had come but had not
+    // begun encoding is abandoned rather than allowed to run into the shutdown
+    // budget, and the next start picks it up.
     await expect(pass.finished).resolves.toEqual({
-      created: 1,
+      created: 0,
       failed: 0,
       stopped: true,
     });
-    await expect(
-      app.mediaStorage.exists(thumbnailFilename(first.record.storedFilename)),
-    ).resolves.toBe(true);
-    await expect(
-      app.mediaStorage.exists(thumbnailFilename(second.record.storedFilename)),
-    ).resolves.toBe(false);
+    for (const { record } of [first, second]) {
+      await expect(
+        app.mediaStorage.exists(thumbnailFilename(record.storedFilename)),
+      ).resolves.toBe(false);
+    }
+    expect(await app.mediaStorage.pruneTemporaryFiles()).toBe(0);
+  });
+
+  it('resolves stop on its own deadline when a record will not finish', async () => {
+    await storeTestMedia(app);
+    // A downscale cannot be cancelled, so shutdown must not be held by one. A
+    // storage call that never settles stands in for one that outlasts the grace
+    // period.
+    const hangingStorage = {
+      ...app.mediaStorage,
+      exists: () => new Promise<boolean>(() => undefined),
+    };
+    const pass = startThumbnailBackfill({
+      log: app.log,
+      mediaRepository: app.mediaRepository,
+      mediaStorage: hangingStorage,
+    });
+
+    vi.useFakeTimers();
+
+    try {
+      const stopped = pass.stop();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(stopped).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serves the derivative it created after a restart', async () => {

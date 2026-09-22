@@ -238,10 +238,11 @@ export const createApp = async (
     app.decorate('thumbnailBackfill', thumbnailBackfill);
 
     // The backfill reads the database, so it has to stop before the connection
-    // closes; that is why closing the connection lives in this hook.
+    // closes; that is why closing the connection lives in this hook. `stop`
+    // bounds its own wait, so a downscale in flight cannot spend the shutdown
+    // budget — it promises to read nothing once it resolves, finished or not.
     app.addHook('onClose', async () => {
-      thumbnailBackfill.stop();
-      await thumbnailBackfill.finished;
+      await thumbnailBackfill.stop();
       database.close();
     });
 

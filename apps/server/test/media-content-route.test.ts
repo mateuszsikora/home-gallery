@@ -257,11 +257,15 @@ describe('GET /api/media/{id}/thumbnail', () => {
       thumbnail,
     );
 
-    return { ...stored, thumbnail };
+    return {
+      ...stored,
+      thumbnail,
+      etag: `"${stored.record.id}-thumb-${thumbnail.byteLength}"`,
+    };
   };
 
   it('serves the derivative instead of the full image', async () => {
-    const { record, thumbnail } = await storeWithThumbnail();
+    const { etag, record, thumbnail } = await storeWithThumbnail();
 
     const response = await app.inject({
       method: 'GET',
@@ -275,18 +279,19 @@ describe('GET /api/media/{id}/thumbnail', () => {
       String(thumbnail.byteLength),
     );
     expect(response.headers['cache-control']).toBe('private, no-cache');
-    expect(response.headers.etag).toBe(`"${record.id}-thumb"`);
+    expect(response.headers.vary).toBe('cookie');
+    expect(response.headers.etag).toBe(etag);
     expect(response.rawPayload.equals(thumbnail)).toBe(true);
   });
 
   it('revalidates a stored preview instead of sending it again', async () => {
-    const { record } = await storeWithThumbnail();
+    const { etag, record } = await storeWithThumbnail();
     const cookie = await createTestAdminSession(app);
 
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.adminMediaThumbnailById(record.id),
-      headers: { cookie, 'if-none-match': `"${record.id}-thumb"` },
+      headers: { cookie, 'if-none-match': etag },
     });
 
     expect(response.statusCode).toBe(304);
@@ -294,13 +299,46 @@ describe('GET /api/media/{id}/thumbnail', () => {
     expect(response.rawPayload).toHaveLength(0);
   });
 
-  it('refuses to revalidate a preview for a caller without a session', async () => {
-    const { record } = await storeWithThumbnail();
+  it.each([
+    ['a weak validator', (etag: string) => `W/${etag}`],
+    ['a list of validators', (etag: string) => `"other-copy", ${etag}`],
+    ['any validator at all', () => '*'],
+  ])('revalidates against %s', async (_name, toHeader) => {
+    const { etag, record } = await storeWithThumbnail();
+    const cookie = await createTestAdminSession(app);
 
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.adminMediaThumbnailById(record.id),
-      headers: { 'if-none-match': `"${record.id}-thumb"` },
+      headers: { cookie, 'if-none-match': toHeader(etag) },
+    });
+
+    expect(response.statusCode).toBe(304);
+  });
+
+  it('answers full bytes when the stored validator is stale', async () => {
+    const { record, thumbnail } = await storeWithThumbnail();
+    const cookie = await createTestAdminSession(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      // What a browser holds after an operator regenerated the derivatives:
+      // the same file, different bytes.
+      headers: { cookie, 'if-none-match': `"${record.id}-thumb-99"` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.rawPayload.equals(thumbnail)).toBe(true);
+  });
+
+  it('refuses to revalidate a preview for a caller without a session', async () => {
+    const { etag, record } = await storeWithThumbnail();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { 'if-none-match': etag },
     });
 
     expectUnavailable(response.statusCode, response.json());
@@ -331,14 +369,16 @@ describe('GET /api/media/{id}/thumbnail', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['cache-control']).toBe('private, no-cache');
-    expect(response.headers.etag).toBe(`"${record.id}-full"`);
+    expect(response.headers.etag).toBe(
+      `"${record.id}-full-${bytes.byteLength}"`,
+    );
     expect(response.rawPayload.equals(bytes)).toBe(true);
   });
 
   it('stops honouring a fallback validator once the derivative exists', async () => {
-    const { record } = await storeTestImage(app);
+    const { bytes, record } = await storeTestImage(app);
     const cookie = await createTestAdminSession(app);
-    const fallbackEtag = `"${record.id}-full"`;
+    const fallbackEtag = `"${record.id}-full-${bytes.byteLength}"`;
 
     await writeFile(
       app.mediaStorage.resolveMediaPath(
@@ -354,7 +394,7 @@ describe('GET /api/media/{id}/thumbnail', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.headers.etag).toBe(`"${record.id}-thumb"`);
+    expect(response.headers.etag).toBe(`"${record.id}-thumb-15"`);
     expect(response.body).toBe('thumbnail bytes');
   });
 

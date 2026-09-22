@@ -75,6 +75,27 @@ const openStoredImage = async (
 };
 
 /**
+ * Accepts every form a client may legitimately send a validator back in: a list
+ * of them, a weak one, and `*` for "whatever you have". A literal comparison
+ * against the one we issued would answer full bytes to all three.
+ */
+const revalidates = (request: ContentRequest, etag: string): boolean => {
+  const header = request.headers['if-none-match'];
+
+  if (header === undefined) {
+    return false;
+  }
+
+  return header
+    .split(',')
+    .map((candidate) => candidate.trim())
+    .some(
+      (candidate) =>
+        candidate === '*' || candidate.replace(/^W\//u, '') === etag,
+    );
+};
+
+/**
  * The public content route. Unknown, disabled, and unreadable media all produce
  * the same `not_found` response so an unauthenticated caller cannot probe which
  * identifiers exist or which photos are merely hidden.
@@ -93,7 +114,7 @@ export const registerMediaContentRoute = (app: FastifyInstance): void => {
         .header('cache-control', IMMUTABLE_CACHE_CONTROL)
         .header('etag', etag);
 
-      if (request.headers['if-none-match'] === etag) {
+      if (revalidates(request, etag)) {
         file.stream.destroy();
         return reply.status(304).send();
       }
@@ -150,9 +171,11 @@ export const registerAdminMediaContentRoute = (app: FastifyInstance): void => {
  * response depends on the mutable state that made `no-store` necessary there,
  * and `no-cache` still forces an authenticated round trip before a stored copy
  * is used. That turns a reload of a whole library into conditional requests
- * rather than the whole library again. The validator distinguishes the
- * derivative from the full-image fallback, so a client holding the fallback
- * stops using it once the backfill catches up.
+ * rather than the whole library again.
+ *
+ * The validator names which file answered and how large it is, so it changes
+ * both when the backfill replaces the fallback with a derivative and when an
+ * operator regenerates derivatives that a browser already holds.
  */
 export const registerAdminMediaThumbnailRoute = (
   app: FastifyInstance,
@@ -169,13 +192,17 @@ export const registerAdminMediaThumbnailRoute = (
         thumbnailFilename(record.storedFilename),
       );
       const file = derivative ?? (await openStoredImage(app, request, record));
-      const etag = `"${record.id}${derivative === undefined ? '-full' : '-thumb'}"`;
+      const source = derivative === undefined ? 'full' : 'thumb';
+      const etag = `"${record.id}-${source}-${file.size}"`;
 
       reply
         .header('cache-control', PRIVATE_REVALIDATE_CACHE_CONTROL)
+        // The response depends on the session cookie. `private` already keeps a
+        // shared cache out of it; this says so to a proxy an operator adds.
+        .header('vary', 'cookie')
         .header('etag', etag);
 
-      if (request.headers['if-none-match'] === etag) {
+      if (revalidates(request, etag)) {
         file.stream.destroy();
         return reply.status(304).send();
       }
