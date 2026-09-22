@@ -215,7 +215,7 @@ bash backup.sh
 Schedule it during a quiet period, for example:
 
 ```cron
-30 3 * * * cd /home/ms/home-gallery/infra && bash backup.sh >> /var/log/home-gallery-backup.log 2>&1
+30 3 * * * cd /srv/home-gallery/infra && bash backup.sh >> /var/log/home-gallery-backup.log 2>&1
 ```
 
 Keep at least one copy on another machine or storage device. Monitor failed cron jobs and periodically verify both the `.tar.gz` and `.sha256` files.
