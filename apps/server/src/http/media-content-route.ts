@@ -24,8 +24,8 @@ const ADMIN_MEDIA_CONTENT_ROUTE = `${API_ROUTES.media}/:id/content`;
 const ADMIN_MEDIA_THUMBNAIL_ROUTE = `${API_ROUTES.media}/:id/thumbnail`;
 
 /**
- * Both content routes report every failure the same way, so no caller can tell
- * an unknown identifier from a hidden photo, an unreadable file, or a missing
+ * Every route here reports every failure the same way, so no caller can tell an
+ * unknown identifier from a hidden photo, an unreadable file, or a missing
  * administration session.
  */
 const unavailable = (): ApiError =>
