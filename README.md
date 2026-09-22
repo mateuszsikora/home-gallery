@@ -85,13 +85,15 @@ bash infra/deploy.sh
 
 `deploy.sh` is the supported path: it validates `.env`, requires mode `600`, pins the Compose project name to `home-gallery`, pulls the configured image tag, and waits for the health checks. The images are public GHCR packages, so no registry login is needed.
 
-The equivalent raw command, if you prefer to see it spelled out:
+The underlying command for the default profile, if you prefer to see it spelled out:
 
 ```bash
 docker compose --project-name home-gallery --env-file .env up -d --wait
 ```
 
 Keep `--project-name home-gallery` either way. `infra/backup.sh` and `infra/restore.sh` refuse to operate on any other project name, and without the flag Compose derives the name from the directory — which silently breaks backup and restore in a fork, a ZIP download, or any directory not named `home-gallery`. Add `--build` to build from source instead of pulling.
+
+That command is not a substitute for `deploy.sh` once `HOME_GALLERY_TLS_ENABLED=true`: the script also adds `docker-compose.tls.yml` and the `caddy` service, and refuses to continue unless `HOME_GALLERY_HTTP_BIND_ADDRESS=127.0.0.1`. Run the raw command against a TLS `.env` and you get the three plain-HTTP services bound to loopback with no proxy in front — nothing reachable, and no error saying so. Deploy TLS through `deploy.sh`.
 
 Home Gallery stays isolated from anything else on the host: its own Compose project, configuration, secrets, ports, containers, network, and data volume. It never joins another project's network, mounts its volumes, addresses its containers, or runs `--remove-orphans`. The default ports avoid the crowded `3000`–`3003` range for the same reason.
 
@@ -101,7 +103,7 @@ Home Gallery stays isolated from anything else on the host: its own Compose proj
 | Administration | `http://HOST:3011` |
 | API            | `http://HOST:3012` |
 
-Now open the administration app. **A fresh installation has no administration password** — the studio opens for anyone who can reach it and says so on every screen until you set one from its **Security** panel. Do that first. Then approve your first contributor after they write to the bot, point a browser at the gallery URL in kiosk or fullscreen mode, and leave it there.
+Now open the administration app. **A fresh installation has no administration password** — it opens for anyone who can reach it, and says so on the sign-in screen and in a banner at the top of the app, until you set one from its **Security** panel. Do that first. Then approve your first contributor after they write to the bot, point a browser at the gallery URL in kiosk or fullscreen mode, and leave it there.
 
 Backup, restore, rollback, host-port changes, and the optional TLS profile are covered in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
@@ -109,7 +111,11 @@ Backup, restore, rollback, host-port changes, and the optional TLS profile are c
 
 The default profile serves plain HTTP and is meant for a trusted LAN or an authenticated private overlay network — not the public internet.
 
-**A new installation starts with the administration app unprotected.** There is no password in `.env` and no default password to look up; the studio is open to anyone who can reach port 3011 until an administrator sets one from the **Security** panel. That is a deliberate trade for a first-run experience on a trusted LAN, and it means the gallery should not be reachable from anywhere else until you have set the password. Passwords are 8 to 128 characters; setting, changing, or removing one signs out every other browser and keeps the one making the change signed in.
+**A new installation starts with the administration app unprotected.** There is no password in `.env` and no default password to look up; the app is open to anyone who can reach port 3011 until an administrator sets one from the **Security** panel. That is a deliberate trade for a first-run experience on a trusted LAN, and it means the gallery should not be reachable from anywhere else until you have set the password. Passwords are 8 to 128 characters and are taken verbatim, including leading and trailing spaces, so whatever a password manager generated is what you can type back. Control characters are rejected because they cannot be retyped, and the value is NFC-normalized before hashing so equivalent Unicode input still matches.
+
+**Upgrading an installation that predates the password also leaves the app unprotected.** The release that removed `HOME_GALLERY_ADMIN_TOKEN` did not migrate it into a password: a panel that was credential-protected before the upgrade is open to the network afterwards, and the only runtime signal is a `warn` line in the server log. Set a password immediately after upgrading and drop the dead token lines from `.env` — see [Upgrade and rollback](docs/DEPLOYMENT.md#upgrade-and-rollback).
+
+Setting, changing, or removing the password signs out every other browser and keeps the one making the change signed in.
 
 Administration and ingestion are separate: the Telegram bot holds only `HOME_GALLERY_INGESTION_TOKEN` and cannot reach administration routes. Browser sessions exchange the password for an opaque `HttpOnly`, `SameSite=Strict` cookie held only in server memory, with an explicit anti-CSRF header on mutations and an eight-hour expiry. The password is never put in browser storage or a URL, is stored only as a salted scrypt hash, is never logged or returned by the API, and a rejected attempt consumes the same bounded authentication rate limit as any other failed credential. A server restart invalidates every session.
 
