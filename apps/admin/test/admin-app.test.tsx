@@ -170,10 +170,8 @@ const openStudio = async (client: AdminClient): Promise<void> => {
     await screen.findByLabelText('Access token'),
     'private-token',
   );
-  await user.click(screen.getByRole('button', { name: 'Open studio' }));
-  expect(
-    await screen.findByRole('heading', { name: 'Photos on rotation' }),
-  ).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Sign in' }));
+  expect(await screen.findByRole('heading', { name: 'Library' })).toBeVisible();
   expect(createClient).toHaveBeenCalledWith();
   expect(client.createAdminSession).toHaveBeenCalledWith('private-token');
 };
@@ -214,7 +212,7 @@ describe('AdminApp', () => {
       await screen.findByLabelText('Access token'),
       'wrong-token',
     );
-    await user.click(screen.getByRole('button', { name: 'Open studio' }));
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('access token was rejected');
@@ -236,9 +234,7 @@ describe('AdminApp', () => {
     );
 
     expect(
-      await screen.findByRole('heading', {
-        name: 'The first frame is waiting.',
-      }),
+      await screen.findByRole('heading', { name: 'No photos yet' }),
     ).toBeVisible();
     expect(createClient).toHaveBeenCalledWith();
     expect(mocks.getAdminSession).toHaveBeenCalledOnce();
@@ -252,7 +248,7 @@ describe('AdminApp', () => {
     const mocks = createClientMocks([]);
     await openStudio(mocks.client);
 
-    await user.click(screen.getByRole('button', { name: 'Lock studio' }));
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
 
     expect(mocks.deleteAdminSession).toHaveBeenCalledOnce();
     expect(await screen.findByLabelText('Access token')).toBeVisible();
@@ -375,7 +371,7 @@ describe('AdminApp', () => {
       .mockResolvedValueOnce({ items: [], nextCursor: null });
     await openStudio(mocks.client);
 
-    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(screen.getByRole('button', { name: 'Delete summer.jpg' }));
     const confirmButton = screen.getByRole('button', { name: 'Delete photo' });
     expect(confirmButton).toHaveFocus();
 
@@ -397,7 +393,7 @@ describe('AdminApp', () => {
 
     expect(mocks.listTelegramContributors).toHaveBeenCalledOnce();
     expect(
-      screen.getByRole('heading', { name: 'Nobody has asked yet.' }),
+      screen.getByRole('heading', { name: 'No access requests' }),
     ).toBeVisible();
     expect(screen.getByText('0 waiting')).toBeVisible();
   });
@@ -409,7 +405,9 @@ describe('AdminApp', () => {
 
     expect(screen.getByText('1 waiting')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Ada Lovelace' })).toBeVisible();
-    expect(screen.getByText('@ada · Telegram ID 123456')).toBeVisible();
+    expect(
+      screen.getByText(/@ada · Telegram ID 123456 · Requested/),
+    ).toBeVisible();
 
     await user.click(
       screen.getByRole('button', { name: 'Approve Ada Lovelace' }),
