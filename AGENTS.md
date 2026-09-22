@@ -22,7 +22,7 @@ When the user asks you to read the Markdown files or continue the project:
 Every implementation session ends with a pull request unless the selected issue is genuinely blocked. The pull request must:
 
 - have an English title and description;
-- use `Closes #<issue-number>` in its description;
+- use `Closes #<issue-number>` in its description; a repository chore requested directly by the user — documentation, CI configuration, a dependency bump — may give a one-line reason instead, under the exception in [CONTRIBUTING.md](CONTRIBUTING.md), but implementation work always closes an issue;
 - summarize the behavior delivered;
 - list the validation commands and results;
 - identify any deliberate follow-up work without silently expanding scope;
