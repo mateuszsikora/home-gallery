@@ -13,6 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import {
+  THUMBNAIL_MAX_EDGE,
+  thumbnailFilename,
+} from '../src/media/thumbnails.js';
+import {
   adminMutationHeaders,
   approveTestContributor,
   createTemporaryDataDirectory,
@@ -122,6 +126,7 @@ describe('POST /api/media', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await app.close();
     await removeTemporaryDataDirectory(dataDirectory);
   });
@@ -178,6 +183,62 @@ describe('POST /api/media', () => {
     const storedPath = app.mediaStorage.resolveMediaPath(record.storedFilename);
     const metadata = await sharp(await readFile(storedPath)).metadata();
     expect(metadata.format).toBe('webp');
+    expect(await readdir(app.mediaStorage.temporaryDirectory)).toEqual([]);
+  });
+
+  it('stores a bounded preview thumbnail next to the normalized image', async () => {
+    const response = await upload(validFields(), {
+      // Noise stands in for photographic detail, so the stored image is
+      // measurably larger than the thumbnail derived from it.
+      bytes: await sharp({
+        create: {
+          width: 1_200,
+          height: 900,
+          channels: 3,
+          background: { r: 15, g: 90, b: 180 },
+          noise: { type: 'gaussian', mean: 128, sigma: 30 },
+        },
+      })
+        .webp()
+        .toBuffer(),
+      filename: 'large.webp',
+      mimeType: 'image/webp',
+    });
+
+    expect(response.statusCode).toBe(201);
+    const record = mediaRecordSchema.parse(response.json());
+    const thumbnailPath = app.mediaStorage.resolveMediaPath(
+      thumbnailFilename(record.storedFilename),
+    );
+    const thumbnail = await readFile(thumbnailPath);
+    const metadata = await sharp(thumbnail).metadata();
+
+    expect(metadata.format).toBe('webp');
+    expect(metadata.width).toBe(THUMBNAIL_MAX_EDGE);
+    expect(metadata.height).toBe(360);
+    expect(thumbnail.byteLength).toBeLessThan(
+      (await readFile(app.mediaStorage.resolveMediaPath(record.storedFilename)))
+        .byteLength,
+    );
+    expect(await readdir(app.mediaStorage.temporaryDirectory)).toEqual([]);
+  });
+
+  it('keeps an upload whose thumbnail cannot be written', async () => {
+    const thumbnails = await import('../src/media/thumbnails.js');
+    vi.spyOn(thumbnails, 'createThumbnail').mockRejectedValue(
+      new Error('simulated encoder failure'),
+    );
+
+    const response = await upload(validFields(), {
+      bytes: await createImage('png'),
+    });
+
+    expect(response.statusCode).toBe(201);
+    const record = mediaRecordSchema.parse(response.json());
+    expect(app.mediaRepository.findById(record.id)).toEqual(record);
+    expect(await readdir(app.mediaStorage.mediaDirectory)).toEqual([
+      record.storedFilename,
+    ]);
     expect(await readdir(app.mediaStorage.temporaryDirectory)).toEqual([]);
   });
 
@@ -496,7 +557,8 @@ describe('POST /api/media', () => {
       'conflict',
     );
     expect(app.mediaRepository.count()).toBe(1);
-    expect(await readdir(app.mediaStorage.mediaDirectory)).toHaveLength(1);
+    // The normalized image and its preview thumbnail.
+    expect(await readdir(app.mediaStorage.mediaDirectory)).toHaveLength(2);
     expect(await readdir(app.mediaStorage.temporaryDirectory)).toEqual([]);
   });
 
@@ -516,11 +578,12 @@ describe('POST /api/media', () => {
       201, 409,
     ]);
     expect(app.mediaRepository.count()).toBe(1);
-    expect(await readdir(app.mediaStorage.mediaDirectory)).toHaveLength(1);
+    // The normalized image and its preview thumbnail.
+    expect(await readdir(app.mediaStorage.mediaDirectory)).toHaveLength(2);
     expect(await readdir(app.mediaStorage.temporaryDirectory)).toEqual([]);
   });
 
-  it('removes the normalized file when the database write fails', async () => {
+  it('removes the normalized file and its thumbnail when the database write fails', async () => {
     vi.spyOn(app.mediaRepository, 'create').mockImplementation(() => {
       throw new Error('simulated database failure');
     });

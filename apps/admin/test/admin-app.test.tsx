@@ -157,8 +157,8 @@ const createClientMocks = (
       deleteMedia,
       getAdminAuthStatus,
       getAdminSession,
-      getAdminMediaContentUrl: (id) =>
-        `http://api.test/api/media/${id}/content`,
+      getAdminMediaThumbnailUrl: (id) =>
+        `http://api.test/api/media/${id}/thumbnail`,
       getSettings,
       listMedia,
       listTelegramContributors,
@@ -696,7 +696,7 @@ describe('AdminApp', () => {
     expect(await screen.findByText('forest.png was moved up.')).toBeVisible();
   });
 
-  it('previews hidden media from the administrative content route', async () => {
+  it('previews hidden media from the administrative thumbnail route', async () => {
     const mocks = createClientMocks();
     await openStudio(mocks.client);
 
@@ -704,7 +704,10 @@ describe('AdminApp', () => {
       within(mediaCard('forest.png')).getByRole('img', {
         name: 'Preview of forest.png',
       }),
-    ).toHaveAttribute('src', `http://api.test/api/media/${ids.second}/content`);
+    ).toHaveAttribute(
+      'src',
+      `http://api.test/api/media/${ids.second}/thumbnail`,
+    );
   });
 
   it('retries a failed preview once visibility changes', async () => {

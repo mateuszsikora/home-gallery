@@ -11,6 +11,7 @@ import {
 } from '@home-gallery/shared-types';
 import type { MediaRecord } from '@home-gallery/shared-types';
 import type { FastifyInstance } from 'fastify';
+import sharp from 'sharp';
 
 import {
   openDatabase,
@@ -123,6 +124,47 @@ export const storeTestMedia = async (
     originalFilename: 'photo.jpg',
     width: 1920,
     height: 1080,
+    ...overrides,
+    id,
+    storedFilename,
+  });
+
+  return { record, bytes };
+};
+
+/**
+ * Adds a media record whose stored file is a real normalized image, which the
+ * thumbnail tests need because they decode what they find on disk.
+ */
+export const storeTestImage = async (
+  app: FastifyInstance,
+  overrides: Partial<CreateMediaInput> = {},
+): Promise<StoredTestMedia> => {
+  const id = overrides.id ?? randomUUID();
+  const storedFilename = overrides.storedFilename ?? `${id}.webp`;
+  // Noise instead of a flat colour, so a downscaled copy is measurably smaller
+  // than the original the way a photograph is.
+  const bytes = await sharp({
+    create: {
+      width: 1_200,
+      height: 900,
+      channels: 3,
+      background: { r: 20, g: 80, b: 160 },
+      noise: { type: 'gaussian', mean: 128, sigma: 30 },
+    },
+  })
+    .webp()
+    .toBuffer();
+
+  await writeFile(app.mediaStorage.resolveMediaPath(storedFilename), bytes);
+
+  const record = app.mediaRepository.create({
+    mediaType: 'image',
+    mimeType: 'image/webp',
+    source: 'telegram',
+    originalFilename: 'photo.jpg',
+    width: 1_200,
+    height: 900,
     ...overrides,
     id,
     storedFilename,

@@ -9,5 +9,7 @@ export * from './http/errors.js';
 export * from './http/health-route.js';
 export * from './http/media-upload-route.js';
 export * from './media/image-normalizer.js';
+export * from './media/thumbnail-backfill.js';
+export * from './media/thumbnails.js';
 export * from './shutdown.js';
 export * from './storage/media-storage.js';

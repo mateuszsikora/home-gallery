@@ -18,6 +18,7 @@ import {
   normalizeImage,
   UnsupportedImageFormatError,
 } from '../media/image-normalizer.js';
+import { createThumbnail, thumbnailFilename } from '../media/thumbnails.js';
 import type { TemporaryMediaFile } from '../storage/media-storage.js';
 import { ApiError } from './errors.js';
 import {
@@ -202,6 +203,7 @@ export const registerMediaUploadRoute = (app: FastifyInstance): void => {
 
       let uploadedFile: TemporaryMediaFile | undefined;
       let normalizedFile: TemporaryMediaFile | undefined;
+      let thumbnailFile: TemporaryMediaFile | undefined;
       try {
         const parsed = await parseUpload(app, request);
         uploadedFile = parsed.uploadedFile;
@@ -221,12 +223,36 @@ export const registerMediaUploadRoute = (app: FastifyInstance): void => {
 
         const id = randomUUID();
         const storedFilename = `${id}.webp`;
+        const thumbnailName = thumbnailFilename(storedFilename);
+        const removeStoredFiles = async (): Promise<void> => {
+          await app.mediaStorage.remove(storedFilename);
+          await app.mediaStorage.remove(thumbnailName);
+        };
 
         try {
           await normalizedFile.commit(storedFilename);
         } catch (error) {
-          await app.mediaStorage.remove(storedFilename);
+          await removeStoredFiles();
           throw error;
+        }
+
+        // The preview is derived from the stored image, so it inherits the
+        // orientation and colour space applied above. Failing to write it only
+        // costs the administration panel its small preview, which falls back to
+        // the full image, so it must not fail an otherwise complete upload.
+        thumbnailFile = await app.mediaStorage.createTemporaryFile();
+
+        try {
+          await createThumbnail(
+            app.mediaStorage.resolveMediaPath(storedFilename),
+            thumbnailFile.path,
+          );
+          await thumbnailFile.commit(thumbnailName);
+        } catch (error) {
+          request.log.warn(
+            { err: error, mediaId: id },
+            'Stored media without an administration thumbnail',
+          );
         }
 
         let record: MediaRecord;
@@ -249,14 +275,18 @@ export const registerMediaUploadRoute = (app: FastifyInstance): void => {
             height: dimensions.height,
           });
         } catch (error) {
-          await app.mediaStorage.remove(storedFilename);
+          await removeStoredFiles();
           throw error;
         }
 
         return await reply.status(201).send(record);
       } finally {
         reservedUploads -= 1;
-        await Promise.all([uploadedFile?.discard(), normalizedFile?.discard()]);
+        await Promise.all([
+          uploadedFile?.discard(),
+          normalizedFile?.discard(),
+          thumbnailFile?.discard(),
+        ]);
       }
     },
   );

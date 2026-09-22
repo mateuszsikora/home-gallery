@@ -50,6 +50,7 @@ Every non-successful response uses this shape:
 | `PATCH`  | `/api/media/{id}`                             | Admin         | Non-empty media update              | Updated media record                 |
 | `DELETE` | `/api/media/{id}`                             | Admin         | None                                | `204 No Content`                     |
 | `GET`    | `/api/media/{id}/content`                     | Admin         | None                                | Normalized image bytes               |
+| `GET`    | `/api/media/{id}/thumbnail`                   | Admin         | None                                | Preview image bytes                  |
 | `GET`    | `/api/playlist`                               | Public        | None                                | Enabled media and gallery settings   |
 | `GET`    | `/media/{id}`                                 | Public        | None                                | Normalized image bytes               |
 | `GET`    | `/api/settings`                               | Admin         | None                                | Gallery settings                     |
@@ -208,7 +209,13 @@ Items are listed in playlist order. `settings.playbackMode` tells the client whe
 
 `GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response, and all three cases answer identically so an unauthenticated caller cannot tell them apart. Successful responses are immutable and carry an ETag, because stored bytes never change.
 
-`GET /api/media/{id}/content` returns the same bytes for a disabled item as well, which is how the administration app previews a photo it has hidden. It accepts the session cookie, so a plain `<img>` element authenticates itself, and it answers `no-store` because visibility is mutable state. A caller without a valid credential gets the same `not_found` response as one asking for an identifier that does not exist.
+`GET /api/media/{id}/content` returns the same bytes for a disabled item as well, at full resolution. It accepts the session cookie, so a plain `<img>` element authenticates itself, and it answers `no-store` because visibility is mutable state. A caller without a valid credential gets the same `not_found` response as one asking for an identifier that does not exist. The bundled administration application no longer calls it — its cards use the thumbnail route below — so it stands as the way any administrative client reaches the full bytes of a photo it has hidden.
+
+`GET /api/media/{id}/thumbnail` answers the same way but with a small WebP derivative whose longest edge is at most 480 pixels, so listing a whole library costs bytes proportional to what an administration card shows rather than to the camera's resolution. The derivative is written next to the normalized image during upload and backfilled in the background after a restart, so a record may not have one yet; the full image is served in its place instead of failing the preview. Authentication and visibility behave exactly as on the content route.
+
+Its caching does not. The response is `private, no-cache` with an ETag rather than `no-store`: the route answers a hidden and a visible photo identically, so nothing in the response depends on the mutable state that `no-store` protects on the content route, while `no-cache` still forces an authenticated request before a stored copy is used. A reload of the administration panel therefore revalidates instead of transferring the library again. A revalidation without a valid session is refused like any other unauthenticated request; it never answers `304`.
+
+The ETag names which file answered and how large it is, so it changes both when the backfill replaces the fallback with a derivative and when an operator deletes the derivatives to have them regenerated at a different size or quality. `Vary: Cookie` states the dependency on the session for any caching proxy an operator puts in front of the API. Both content routes and this one accept a validator as a list, as a weak validator, and as `*`.
 
 ### Telegram contributors
 

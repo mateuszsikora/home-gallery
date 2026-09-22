@@ -291,6 +291,39 @@ curl --fail --silent --show-error \
   --output /dev/null \
   "http://127.0.0.1:$HOME_GALLERY_GALLERY_PORT/media/$MEDIA_ID"
 
+# The administration cards load previews through this route, so the proxy has to
+# pass both it and the validator the browser revalidates with.
+THUMBNAIL_HEADERS=$(curl --fail --silent --show-error \
+  --dump-header - --output /dev/null \
+  --cookie "$SESSION_COOKIE_JAR" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media/$MEDIA_ID/thumbnail")
+if ! grep -qi '^cache-control: *private, no-cache' <<<"$THUMBNAIL_HEADERS"; then
+  echo "ERROR: Administration preview was not marked private and revalidated." >&2
+  exit 1
+fi
+THUMBNAIL_ETAG=$( (grep -i '^etag:' <<<"$THUMBNAIL_HEADERS" || true) | tr -d '\r' | cut -d' ' -f2)
+if [[ -z "$THUMBNAIL_ETAG" ]]; then
+  echo "ERROR: Administration preview carried no ETag to revalidate with." >&2
+  exit 1
+fi
+REVALIDATED_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$SESSION_COOKIE_JAR" \
+  --header "If-None-Match: $THUMBNAIL_ETAG" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media/$MEDIA_ID/thumbnail")
+if [[ "$REVALIDATED_STATUS" != "304" ]]; then
+  echo "ERROR: Administration preview answered $REVALIDATED_STATUS instead of revalidating." >&2
+  exit 1
+fi
+# 404, never 401: a preview route tells an unauthenticated caller nothing about
+# which identifiers exist.
+ANONYMOUS_THUMBNAIL_STATUS=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --header "If-None-Match: $THUMBNAIL_ETAG" \
+  "http://127.0.0.1:$HOME_GALLERY_ADMIN_PORT/api/media/$MEDIA_ID/thumbnail")
+if [[ "$ANONYMOUS_THUMBNAIL_STATUS" != "404" ]]; then
+  echo "ERROR: Administration preview answered $ANONYMOUS_THUMBNAIL_STATUS without a session." >&2
+  exit 1
+fi
+
 if [[ "${HOME_GALLERY_SMOKE_REPORT_RESOURCES:-0}" == "1" ]]; then
   echo "Idle container resource snapshot:"
   RESOURCE_CONTAINERS=($(dc ps --quiet server gallery admin))

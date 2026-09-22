@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, writeFile } from 'node:fs/promises';
 
 import {
   API_ROUTES,
@@ -14,6 +14,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
+import { thumbnailFilename } from '../src/media/thumbnails.js';
 import {
   adminMutationHeaders,
   createTemporaryDataDirectory,
@@ -321,6 +322,23 @@ describe('media management routes', () => {
       expect(response.statusCode).toBe(204);
       expect(response.body).toBe('');
       expect(app.mediaRepository.findById(record.id)).toBeUndefined();
+      expect(await readdir(app.mediaStorage.mediaDirectory)).toEqual([]);
+    });
+
+    it('removes the preview derivative along with the image', async () => {
+      const { record } = await storeTestMedia(app);
+      const thumbnail = thumbnailFilename(record.storedFilename);
+      await writeFile(
+        app.mediaStorage.resolveMediaPath(thumbnail),
+        'thumbnail bytes',
+      );
+
+      const response = await authenticated(
+        'DELETE',
+        API_ROUTES.mediaById(record.id),
+      );
+
+      expect(response.statusCode).toBe(204);
       expect(await readdir(app.mediaStorage.mediaDirectory)).toEqual([]);
     });
 
