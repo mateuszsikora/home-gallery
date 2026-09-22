@@ -18,7 +18,41 @@ const ids = {
   first: '00000000-0000-4000-8000-000000000001',
   second: '00000000-0000-4000-8000-000000000002',
   third: '00000000-0000-4000-8000-000000000003',
+  fourth: '00000000-0000-4000-8000-000000000004',
 } as const;
+
+const mediaUrl = (id: string): string => `http://gallery.test/media/${id}`;
+
+/**
+ * A preloader whose promises only settle when the test says so, which is how
+ * the slideshow behaves around a photo the browser has not finished decoding.
+ */
+const createPreloadTracker = (): {
+  readonly callsFor: (url: string) => number;
+  readonly preloadImage: (url: string) => Promise<void>;
+  readonly resolveAll: () => void;
+} => {
+  const calls: string[] = [];
+  const pending = new Map<string, () => void>();
+
+  return {
+    callsFor: (url) => calls.filter((called) => called === url).length,
+    preloadImage: async (url) => {
+      calls.push(url);
+
+      await new Promise<void>((resolve) => {
+        pending.set(url, resolve);
+      });
+    },
+    resolveAll: () => {
+      for (const resolve of pending.values()) {
+        resolve();
+      }
+
+      pending.clear();
+    },
+  };
+};
 
 interface ItemSize {
   readonly height: number;
@@ -322,6 +356,116 @@ describe('Gallery', () => {
     expect(preloadImage).toHaveBeenCalledWith(
       `http://api.test:3012/media/${ids.third}`,
     );
+  });
+
+  it('holds the current photo until the next one is decoded', async () => {
+    vi.useFakeTimers();
+    const preloads = createPreloadTracker();
+    const client: PlaylistClient = {
+      getPlaylist: vi.fn().mockResolvedValue(
+        createPlaylist([ids.first, ids.second], {
+          slideDurationMs: 1_000,
+          fadeDurationMs: 200,
+        }),
+      ),
+    };
+
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={client}
+        preloadImage={preloads.preloadImage}
+      />,
+    );
+    await flushPromises();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.first));
+    expect(renderedImages()).toHaveLength(1);
+
+    await act(async () => {
+      preloads.resolveAll();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.second));
+    expect(renderedImages()[1]).toHaveAttribute('data-state', 'previous');
+  });
+
+  it('moves on when an upcoming photo never arrives', async () => {
+    vi.useFakeTimers();
+    const preloads = createPreloadTracker();
+    const client: PlaylistClient = {
+      getPlaylist: vi
+        .fn()
+        .mockResolvedValue(
+          createPlaylist([ids.first, ids.second], { slideDurationMs: 1_000 }),
+        ),
+    };
+
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={client}
+        preloadImage={preloads.preloadImage}
+      />,
+    );
+    await flushPromises();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_999);
+    });
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.first));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.second));
+  });
+
+  it('decodes a photo again once the loop comes back around to it', async () => {
+    vi.useFakeTimers();
+    const preloads = createPreloadTracker();
+    const client: PlaylistClient = {
+      getPlaylist: vi.fn().mockResolvedValue(
+        createPlaylist([ids.first, ids.second, ids.third, ids.fourth], {
+          slideDurationMs: 1_000,
+          fadeDurationMs: 200,
+        }),
+      ),
+    };
+
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={client}
+        preloadImage={preloads.preloadImage}
+      />,
+    );
+    await flushPromises();
+
+    expect(preloads.callsFor(mediaUrl(ids.second))).toBe(1);
+
+    for (let step = 0; step < 3; step += 1) {
+      await act(async () => {
+        preloads.resolveAll();
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.fourth));
+    expect(preloads.callsFor(mediaUrl(ids.second))).toBe(2);
+
+    await act(async () => {
+      preloads.resolveAll();
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.first));
   });
 });
 
