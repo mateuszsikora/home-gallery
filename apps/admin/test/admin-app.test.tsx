@@ -138,7 +138,8 @@ const createClientMocks = (
       deleteAdminSession,
       deleteMedia,
       getAdminSession,
-      getMediaContentUrl: (id) => `http://api.test/media/${id}`,
+      getAdminMediaContentUrl: (id) =>
+        `http://api.test/api/media/${id}/content`,
       getSettings,
       listMedia,
       listTelegramContributors,
@@ -354,6 +355,44 @@ describe('AdminApp', () => {
       });
     });
     expect(await screen.findByText('forest.png was moved up.')).toBeVisible();
+  });
+
+  it('previews hidden media from the administrative content route', async () => {
+    const mocks = createClientMocks();
+    await openStudio(mocks.client);
+
+    expect(
+      within(mediaCard('forest.png')).getByRole('img', {
+        name: 'Preview of forest.png',
+      }),
+    ).toHaveAttribute('src', `http://api.test/api/media/${ids.second}/content`);
+  });
+
+  it('retries a failed preview once visibility changes', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks();
+    await openStudio(mocks.client);
+
+    fireEvent.error(
+      within(mediaCard('forest.png')).getByRole('img', {
+        name: 'Preview of forest.png',
+      }),
+    );
+    expect(
+      within(mediaCard('forest.png')).queryByRole('img', {
+        name: 'Preview of forest.png',
+      }),
+    ).toBeNull();
+
+    await user.click(
+      within(mediaCard('forest.png')).getByRole('button', { name: 'Hidden' }),
+    );
+
+    expect(
+      await within(mediaCard('forest.png')).findByRole('img', {
+        name: 'Preview of forest.png',
+      }),
+    ).toBeVisible();
   });
 
   it('requires focused confirmation and submits deletion only once', async () => {

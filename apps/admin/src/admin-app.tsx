@@ -40,8 +40,8 @@ export type AdminClient = Pick<
   | 'createAdminSession'
   | 'deleteAdminSession'
   | 'deleteMedia'
+  | 'getAdminMediaContentUrl'
   | 'getAdminSession'
-  | 'getMediaContentUrl'
   | 'getSettings'
   | 'listMedia'
   | 'listTelegramContributors'
@@ -864,7 +864,7 @@ export const AdminApp = ({
                                       new Set(failures).add(item.id),
                                     );
                                   }}
-                                  src={client.getMediaContentUrl(item.id)}
+                                  src={client.getAdminMediaContentUrl(item.id)}
                                   width={item.width}
                                 />
                               )}

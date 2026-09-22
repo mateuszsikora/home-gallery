@@ -296,6 +296,17 @@ describe('createHomeGalleryClient', () => {
     );
   });
 
+  it('builds a validated administrative content URL', () => {
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test/root/',
+      useAdminSession: true,
+    });
+
+    expect(client.getAdminMediaContentUrl(mediaId)).toBe(
+      `https://gallery.example.test/root/api/media/${mediaId}/content`,
+    );
+  });
+
   it('registers, lists, and decides Telegram contributors', async () => {
     const contributor = {
       telegramUserId: '123456',
