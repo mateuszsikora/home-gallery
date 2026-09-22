@@ -13,8 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import {
+  adminMutationHeaders,
   approveTestContributor,
   createTemporaryDataDirectory,
+  createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
   TEST_INGESTION_TOKEN,
@@ -330,6 +332,38 @@ describe('POST /api/media', () => {
     );
 
     expect(response.statusCode).toBe(201);
+  });
+
+  it('refuses a browser upload as forbidden while administration uploads are off', async () => {
+    const { boundary, payload } = multipartBody(
+      [
+        { name: 'originalFilename', value: 'family-photo.png' },
+        { name: 'source', value: 'admin' },
+      ],
+      {
+        bytes: await createImage('png'),
+        filename: 'family-photo.png',
+        mimeType: 'image/png',
+      },
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: API_ROUTES.media,
+      headers: {
+        ...adminMutationHeaders(await createTestAdminSession(app)),
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+      },
+      payload,
+    });
+
+    // 401 would tell the administration app the session expired, which it has
+    // not; the deployment simply does not accept uploads from a browser.
+    expect(response.statusCode).toBe(403);
+    expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
+      'forbidden',
+    );
+    await expectEmptyStorage();
   });
 
   it('rejects supported-by-Sharp formats outside the upload allowlist', async () => {

@@ -144,7 +144,9 @@ describe('telegram contributor routes', () => {
         payload: { telegramUserId: '123' },
       });
 
-      expect(response.statusCode).toBe(401);
+      // `forbidden`, not `unauthorized`: the session itself is still valid, and
+      // 401 is what tells the administration app that one has expired.
+      expect(response.statusCode).toBe(403);
       expect(app.telegramContributorRepository.list()).toEqual([]);
     });
   });

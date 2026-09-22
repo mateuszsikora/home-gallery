@@ -215,11 +215,21 @@ export const registerAuthentication = (
       return;
     }
 
-    if (
-      options.allowAdministrationUploads &&
-      acceptAdministrationSession(request)
-    ) {
-      return;
+    if (acceptAdministrationSession(request)) {
+      if (options.allowAdministrationUploads) {
+        return;
+      }
+
+      // The session is valid, so answering `unauthorized` would tell the
+      // administration app that it expired and send the administrator back to
+      // the sign-in screen. The failure limit is left alone for the same
+      // reason: a refused scope is not a failed credential, and counting it
+      // would let one disabled control lock its own administrator out of
+      // signing in again.
+      throw new ApiError(
+        'forbidden',
+        'This server does not accept ingestion from an administration session',
+      );
     }
 
     reject(

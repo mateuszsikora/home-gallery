@@ -183,6 +183,7 @@ interface StudioData {
   readonly media: MediaRecord[];
   readonly passwordConfigured: boolean;
   readonly settings: GallerySettings;
+  readonly uploadsEnabled: boolean;
 }
 
 /** Everything the studio needs, fetched together so it opens in one state. */
@@ -199,6 +200,7 @@ const loadStudio = async (client: AdminClient): Promise<StudioData> => {
     media,
     passwordConfigured: auth.passwordConfigured,
     settings,
+    uploadsEnabled: auth.administrationUploadsEnabled,
   };
 };
 
@@ -215,10 +217,12 @@ const isUnauthorized = (error: unknown): boolean =>
   error instanceof HomeGalleryApiError && error.status === 401;
 
 /**
- * The server answers a rejected current password with 403 so it cannot be
- * mistaken for the expired session that 401 always means here.
+ * Everything the server refuses while the session is still valid — a rejected
+ * current password, an upload the deployment does not accept — is answered
+ * with 403, so none of it can be mistaken for the expired session that 401
+ * always means here.
  */
-const isRejectedPassword = (error: unknown): boolean =>
+const isForbidden = (error: unknown): boolean =>
   error instanceof HomeGalleryApiError && error.status === 403;
 
 const formatTimestamp = (timestamp: string): string =>
@@ -301,6 +305,9 @@ export const AdminApp = ({
   // Assumed until the server answers, so a failed status request never renders
   // the studio as open when it is in fact protected.
   const [passwordConfigured, setPasswordConfigured] = useState(true);
+  // Assumed off for the mirrored reason: the deployment default rejects browser
+  // uploads, so the control stays hidden until the server says it is accepted.
+  const [uploadsEnabled, setUploadsEnabled] = useState(false);
   const [securityDraft, setSecurityDraft] =
     useState<SecurityDraft>(EMPTY_SECURITY_DRAFT);
   const [phase, setPhase] = useState<Phase>('loading');
@@ -336,6 +343,7 @@ export const AdminApp = ({
     setContributors(studio.contributors);
     setSettingsDraft(toSettingsDraft(studio.settings));
     setPasswordConfigured(studio.passwordConfigured);
+    setUploadsEnabled(studio.uploadsEnabled);
     setSecurityDraft(EMPTY_SECURITY_DRAFT);
     setPasswordInput('');
     setPhase('ready');
@@ -493,7 +501,7 @@ export const AdminApp = ({
         'The administration password was saved. Other signed-in browsers were locked out.',
       );
     } catch (reason) {
-      if (isRejectedPassword(reason)) {
+      if (isForbidden(reason)) {
         setError('The current password is incorrect.');
       } else {
         handleActionFailure(reason, 'The password could not be saved.');
@@ -527,7 +535,7 @@ export const AdminApp = ({
         'The administration password was removed. Anyone on this network can now open the studio.',
       );
     } catch (reason) {
-      if (isRejectedPassword(reason)) {
+      if (isForbidden(reason)) {
         setError('The current password is incorrect.');
       } else {
         handleActionFailure(reason, 'The password could not be removed.');
@@ -591,7 +599,16 @@ export const AdminApp = ({
       setSelectedFileName(undefined);
       setNotice(`${file.name} was uploaded and added to the gallery.`);
     } catch (reason) {
-      handleActionFailure(reason, 'The image could not be uploaded.');
+      // The server refuses a browser upload with 403, so a deployment that
+      // turned the capability off after this studio opened says so plainly and
+      // withdraws the control instead of repeating a failure.
+      if (isForbidden(reason)) {
+        setUploadsEnabled(false);
+        setSelectedFileName(undefined);
+        setError('Browser uploads are disabled on this server.');
+      } else {
+        handleActionFailure(reason, 'The image could not be uploaded.');
+      }
     } finally {
       setBusyAction(undefined);
     }
@@ -922,65 +939,73 @@ export const AdminApp = ({
               </div>
 
               <div className="panel__body">
-                <form
-                  className="uploader"
-                  onSubmit={(event) => void uploadMedia(event)}
-                >
-                  <div className="uploader__field">
-                    <label htmlFor="media-upload">Add a photograph</label>
-                    {/*
-                     * The native file control is replaced by a button that
-                     * forwards the click, so the row matches the rest of the
-                     * panel. Validation stays in `uploadMedia`, because a
-                     * visually hidden `required` input cannot be focused to
-                     * show the browser's own message.
-                     */}
-                    <div className="file-picker">
-                      <button
-                        className="button button--secondary"
-                        disabled={actionInProgress}
-                        onClick={() => uploadInputRef.current?.click()}
-                        type="button"
-                      >
-                        Choose file
-                      </button>
-                      <span className="file-picker__name" id="upload-hint">
-                        {selectedFileName ?? 'JPEG, PNG, WebP, HEIC or HEIF'}
-                      </span>
-                    </div>
-                    <input
-                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
-                      aria-describedby="upload-hint"
-                      className="sr-only"
-                      id="media-upload"
-                      name="media"
-                      onChange={(event) => {
-                        setSelectedFileName(
-                          event.currentTarget.files?.[0]?.name,
-                        );
-                      }}
-                      ref={uploadInputRef}
-                      tabIndex={-1}
-                      type="file"
-                    />
-                  </div>
-                  <button
-                    className="button button--primary"
-                    disabled={actionInProgress}
-                    type="submit"
+                {uploadsEnabled ? (
+                  <form
+                    className="uploader"
+                    onSubmit={(event) => void uploadMedia(event)}
                   >
-                    <UploadIcon />
-                    {busyAction === 'upload' ? 'Uploading…' : 'Upload photo'}
-                  </button>
-                </form>
+                    <div className="uploader__field">
+                      <label htmlFor="media-upload">Add a photograph</label>
+                      {/*
+                       * The native file control is replaced by a button that
+                       * forwards the click, so the row matches the rest of the
+                       * panel. Validation stays in `uploadMedia`, because a
+                       * visually hidden `required` input cannot be focused to
+                       * show the browser's own message.
+                       */}
+                      <div className="file-picker">
+                        <button
+                          className="button button--secondary"
+                          disabled={actionInProgress}
+                          onClick={() => uploadInputRef.current?.click()}
+                          type="button"
+                        >
+                          Choose file
+                        </button>
+                        <span className="file-picker__name" id="upload-hint">
+                          {selectedFileName ?? 'JPEG, PNG, WebP, HEIC or HEIF'}
+                        </span>
+                      </div>
+                      <input
+                        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+                        aria-describedby="upload-hint"
+                        className="sr-only"
+                        id="media-upload"
+                        name="media"
+                        onChange={(event) => {
+                          setSelectedFileName(
+                            event.currentTarget.files?.[0]?.name,
+                          );
+                        }}
+                        ref={uploadInputRef}
+                        tabIndex={-1}
+                        type="file"
+                      />
+                    </div>
+                    <button
+                      className="button button--primary"
+                      disabled={actionInProgress}
+                      type="submit"
+                    >
+                      <UploadIcon />
+                      {busyAction === 'upload' ? 'Uploading…' : 'Upload photo'}
+                    </button>
+                  </form>
+                ) : (
+                  <p className="uploader-note">
+                    Browser uploads are disabled on this server. Photographs
+                    arrive through Telegram or another ingestion client.
+                  </p>
+                )}
 
                 {media.length === 0 ? (
                   <div className="empty">
                     <ImageIcon />
                     <h3>No photos yet</h3>
                     <p>
-                      Upload a photograph or approve a Telegram contributor to
-                      fill the rotation.
+                      {uploadsEnabled
+                        ? 'Upload a photograph or approve a Telegram contributor to fill the rotation.'
+                        : 'Approve a Telegram contributor to fill the rotation.'}
                     </p>
                   </div>
                 ) : (

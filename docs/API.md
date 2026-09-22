@@ -4,7 +4,7 @@ The shared runtime schemas and TypeScript types live in `@home-gallery/shared-ty
 
 ## Conventions
 
-- Administration routes require the browser session cookie created by the session endpoint. Ingestion routes require `Authorization: Bearer <token>`; the ingestion token is never accepted in a URL. The two scopes are independent, and neither credential is accepted on the other's routes.
+- Administration routes require the browser session cookie created by the session endpoint. Ingestion routes require `Authorization: Bearer <token>`; the ingestion token is never accepted in a URL. The two scopes are independent, and neither credential is accepted on the other's routes. A valid administration session offered on an ingestion route is refused with `403` and error code `forbidden`, so it is never confused with the `401` that means the session expired.
 - Cookie-authenticated `POST`, `PATCH`, and `DELETE` requests require `X-Home-Gallery-CSRF: 1`. Ingestion bearer clients do not need this header.
 - JSON requests use `Content-Type: application/json` and JSON responses use `Content-Type: application/json`.
 - Timestamps are ISO 8601 UTC strings.
@@ -35,38 +35,41 @@ Every non-successful response uses this shape:
 
 ## Routes
 
-| Method   | Path                                          | Access        | Request                             | Successful response                |
-| -------- | --------------------------------------------- | ------------- | ----------------------------------- | ---------------------------------- |
-| `GET`    | `/api/admin/auth`                             | Public        | None                                | Whether a password is configured   |
-| `POST`   | `/api/admin/session`                          | Password      | CSRF header, optional password      | Session expiry                     |
-| `GET`    | `/api/admin/session`                          | Admin session | None                                | Session expiry                     |
-| `DELETE` | `/api/admin/session`                          | Admin session | CSRF header                         | `204 No Content`                   |
-| `PUT`    | `/api/admin/password`                         | Admin session | CSRF header, password change        | `204 No Content`                   |
-| `DELETE` | `/api/admin/password`                         | Admin session | CSRF header, current password       | `204 No Content`                   |
-| `GET`    | `/health`                                     | Public        | None                                | Health status                      |
-| `POST`   | `/api/media`                                  | Ingest        | Multipart image and attribution     | Media record                       |
-| `GET`    | `/api/media`                                  | Admin         | Optional `cursor` and `limit` query | Paginated media list               |
-| `GET`    | `/api/media/{id}`                             | Admin         | None                                | Media record                       |
-| `PATCH`  | `/api/media/{id}`                             | Admin         | Non-empty media update              | Updated media record               |
-| `DELETE` | `/api/media/{id}`                             | Admin         | None                                | `204 No Content`                   |
-| `GET`    | `/api/media/{id}/content`                     | Admin         | None                                | Normalized image bytes             |
-| `GET`    | `/api/playlist`                               | Public        | None                                | Enabled media and gallery settings |
-| `GET`    | `/media/{id}`                                 | Public        | None                                | Normalized image bytes             |
-| `GET`    | `/api/settings`                               | Admin         | None                                | Gallery settings                   |
-| `PATCH`  | `/api/settings`                               | Admin         | Non-empty settings update           | Updated gallery settings           |
-| `POST`   | `/api/telegram/contributors`                  | Ingest        | Telegram identity                   | Contributor record                 |
-| `GET`    | `/api/telegram/contributors`                  | Admin         | None                                | Contributor list                   |
-| `PATCH`  | `/api/telegram/contributors/{telegramUserId}` | Admin         | Approval decision                   | Updated contributor record         |
+| Method   | Path                                          | Access        | Request                             | Successful response                  |
+| -------- | --------------------------------------------- | ------------- | ----------------------------------- | ------------------------------------ |
+| `GET`    | `/api/admin/auth`                             | Public        | None                                | Password state and upload capability |
+| `POST`   | `/api/admin/session`                          | Password      | CSRF header, optional password      | Session expiry                       |
+| `GET`    | `/api/admin/session`                          | Admin session | None                                | Session expiry                       |
+| `DELETE` | `/api/admin/session`                          | Admin session | CSRF header                         | `204 No Content`                     |
+| `PUT`    | `/api/admin/password`                         | Admin session | CSRF header, password change        | `204 No Content`                     |
+| `DELETE` | `/api/admin/password`                         | Admin session | CSRF header, current password       | `204 No Content`                     |
+| `GET`    | `/health`                                     | Public        | None                                | Health status                        |
+| `POST`   | `/api/media`                                  | Ingest        | Multipart image and attribution     | Media record                         |
+| `GET`    | `/api/media`                                  | Admin         | Optional `cursor` and `limit` query | Paginated media list                 |
+| `GET`    | `/api/media/{id}`                             | Admin         | None                                | Media record                         |
+| `PATCH`  | `/api/media/{id}`                             | Admin         | Non-empty media update              | Updated media record                 |
+| `DELETE` | `/api/media/{id}`                             | Admin         | None                                | `204 No Content`                     |
+| `GET`    | `/api/media/{id}/content`                     | Admin         | None                                | Normalized image bytes               |
+| `GET`    | `/api/playlist`                               | Public        | None                                | Enabled media and gallery settings   |
+| `GET`    | `/media/{id}`                                 | Public        | None                                | Normalized image bytes               |
+| `GET`    | `/api/settings`                               | Admin         | None                                | Gallery settings                     |
+| `PATCH`  | `/api/settings`                               | Admin         | Non-empty settings update           | Updated gallery settings             |
+| `POST`   | `/api/telegram/contributors`                  | Ingest        | Telegram identity                   | Contributor record                   |
+| `GET`    | `/api/telegram/contributors`                  | Admin         | None                                | Contributor list                     |
+| `PATCH`  | `/api/telegram/contributors/{telegramUserId}` | Admin         | Approval decision                   | Updated contributor record           |
 
 ### Administration password
 
-A fresh installation has no administration password, and anyone who can reach the server can open the studio. `GET /api/admin/auth` is public and reports the current state so the administration app knows which sign-in screen to render:
+A fresh installation has no administration password, and anyone who can reach the server can open the studio. `GET /api/admin/auth` is public and reports the current state so the administration app knows which sign-in screen to render and which controls the deployment accepts:
 
 ```json
 {
+  "administrationUploadsEnabled": false,
   "passwordConfigured": false
 }
 ```
+
+`administrationUploadsEnabled` mirrors `HOME_GALLERY_ALLOW_ADMIN_UPLOADS`. The administration app hides its upload control when it is false, rather than offering an action the server will refuse.
 
 `PUT /api/admin/password` sets or changes the password. It needs an administration session, `X-Home-Gallery-CSRF: 1`, and a body of:
 
@@ -119,7 +122,7 @@ The healthy response uses HTTP `200`. If the database readiness probe fails, the
 
 `POST /api/media` uses `multipart/form-data` with these fields:
 
-The ingestion credential is required. An administration session is accepted only when the operator explicitly enables administration uploads.
+The ingestion credential is required. An administration session is accepted only when the operator explicitly enables administration uploads; otherwise a valid session is answered `403` with error code `forbidden`, never the `401` that means an expired session.
 
 | Field              | Required | Description                                                           |
 | ------------------ | -------- | --------------------------------------------------------------------- |

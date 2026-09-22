@@ -20,6 +20,7 @@ const toResponse = (expiresAt: number) => ({
 export const registerAdminSessionRoutes = (
   app: FastifyInstance,
   options: {
+    allowAdministrationUploads: boolean;
     credentials: AdminCredentials;
     secureCookie: boolean;
     sessionStore: AdminSessionStore;
@@ -32,7 +33,11 @@ export const registerAdminSessionRoutes = (
     secure: options.secureCookie,
   };
 
+  // Public on purpose: it reports only what the deployment already reveals by
+  // accepting or refusing a request, and the studio needs it before it can
+  // render a sign-in screen or an upload control that will work.
   app.get(API_ROUTES.adminAuth, async () => ({
+    administrationUploadsEnabled: options.allowAdministrationUploads,
     passwordConfigured: options.credentials.isPasswordConfigured(),
   }));
 

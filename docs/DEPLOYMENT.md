@@ -69,7 +69,7 @@ With the default ports, open:
 - `http://HOST:3011` for administration;
 - `http://HOST:3012/health` for the API health response.
 
-A new deployment has no administration password, so the administration application opens for anyone who can reach it and says so until a password is set from its Security panel. Set one before exposing the deployment beyond a trusted network. The application then asks for that password once and exchanges it for an opaque HttpOnly browser session; it does not store the password. Browser uploads are rejected unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; leave the default in place when Telegram or another ingestion client is the only uploader. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `HOST`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless the supported TLS profile or another LAN reverse proxy terminates ports 80 or 443.
+A new deployment has no administration password, so the administration application opens for anyone who can reach it and says so until a password is set from its Security panel. Set one before exposing the deployment beyond a trusted network. The application then asks for that password once and exchanges it for an opaque HttpOnly browser session; it does not store the password. Browser uploads are rejected unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; leave the default in place when Telegram or another ingestion client is the only uploader, and the application hides its upload control instead of offering an action the server will refuse. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `HOST`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless the supported TLS profile or another LAN reverse proxy terminates ports 80 or 443.
 
 When the host runs other Compose projects, verify their state and the occupied ports before and after first deployment:
 
@@ -125,7 +125,7 @@ The ingestion token is rotatable without a synchronized outage:
 5. clear `HOME_GALLERY_INGESTION_TOKEN_PREVIOUS` and deploy again;
 6. verify that the retired value returns `401`.
 
-The administration password is rotated from the administration application instead, and needs no deployment: changing it signs out every other browser immediately and keeps the one making the change signed in. `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` is the explicit compatibility control for browser uploads and should be enabled only when that feature is needed; it lets an administration session reach the otherwise ingestion-only upload route, including while no password is set.
+The administration password is rotated from the administration application instead, and needs no deployment: changing it signs out every other browser immediately and keeps the one making the change signed in. `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` is the explicit compatibility control for browser uploads and should be enabled only when that feature is needed; it lets an administration session reach the otherwise ingestion-only upload route, including while no password is set. Changing it does need a restart, and the administration application shows or hides its upload control to match on the next sign-in.
 
 ### Recovering a forgotten administration password
 
