@@ -51,7 +51,7 @@ A contributor writes to the bot. Their first message creates a pending access re
 - Server-side content verification, size and decoded-pixel limits, EXIF orientation handling, and normalization to a browser-friendly format.
 - Optional direct upload from the administration app, off by default behind `HOME_GALLERY_ALLOW_ADMIN_UPLOADS`.
 
-![The administration app managing the library, contributors, and playback settings](docs/screenshots/admin-desktop.png)
+![The administration app managing the library, Telegram contributors, playback settings, and the administration password](docs/screenshots/admin-desktop.png)
 
 The upload control visible in the screenshot is always rendered, but the server rejects browser uploads unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`. Both interfaces reflow for narrow screens — see [the gallery](docs/screenshots/gallery-narrow.png) and [the administration app](docs/screenshots/admin-narrow.png) on a phone.
 
