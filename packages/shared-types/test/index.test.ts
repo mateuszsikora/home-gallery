@@ -4,6 +4,7 @@ import {
   API_ERROR_STATUS,
   API_ROUTES,
   DEFAULT_GALLERY_SETTINGS,
+  adminAuthStatusSchema,
   adminSessionSchema,
   apiErrorBodySchema,
   createApiErrorBody,
@@ -139,6 +140,22 @@ describe('administration session contract', () => {
       adminSessionSchema.safeParse({ expiresAt: 'tomorrow' }).success,
     ).toBe(false);
     expect(API_ROUTES.adminSession).toBe('/api/admin/session');
+  });
+
+  it('reads an older auth response as refusing browser uploads', () => {
+    // A server that predates the field must leave the studio usable, with the
+    // upload control hidden rather than offered and refused.
+    expect(adminAuthStatusSchema.parse({ passwordConfigured: true })).toEqual({
+      administrationUploadsEnabled: false,
+      passwordConfigured: true,
+    });
+    expect(
+      adminAuthStatusSchema.safeParse({
+        administrationUploadsEnabled: true,
+        passwordConfigured: false,
+        unexpected: true,
+      }).success,
+    ).toBe(false);
   });
 });
 

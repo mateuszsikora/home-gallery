@@ -125,7 +125,7 @@ The ingestion token is rotatable without a synchronized outage:
 5. clear `HOME_GALLERY_INGESTION_TOKEN_PREVIOUS` and deploy again;
 6. verify that the retired value returns `401`.
 
-The administration password is rotated from the administration application instead, and needs no deployment: changing it signs out every other browser immediately and keeps the one making the change signed in. `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` is the explicit compatibility control for browser uploads and should be enabled only when that feature is needed; it lets an administration session reach the otherwise ingestion-only upload route, including while no password is set. Changing it does need a restart, and the administration application shows or hides its upload control to match on the next sign-in.
+The administration password is rotated from the administration application instead, and needs no deployment: changing it signs out every other browser immediately and keeps the one making the change signed in. `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` is the explicit compatibility control for browser uploads and should be enabled only when that feature is needed; it lets an administration session reach the otherwise ingestion-only upload route, including while no password is set. Changing it does need a restart, and the administration application shows or hides its upload control to match the next time the studio loads.
 
 ### Recovering a forgotten administration password
 

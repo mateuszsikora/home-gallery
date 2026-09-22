@@ -239,6 +239,40 @@ describe('credential rotation and rate limiting', () => {
     }
   });
 
+  it('still bounds ingestion token guesses that carry a valid session', async () => {
+    const app = await createApp(
+      createTestConfig(dataDirectory, {
+        authenticationRateLimit: { max: 2, windowMs: 60_000 },
+      }),
+    );
+    app.get(
+      INGESTION_ROUTE,
+      { onRequest: app.requireIngestionToken },
+      async () => ({ ok: true }),
+    );
+
+    try {
+      const sessionCookie = await createTestAdminSession(app);
+      // A session cookie must not buy unlimited guesses at the ingestion
+      // token: a wrong bearer is a failed credential whatever accompanies it.
+      const guess = (attempt: number) =>
+        app.inject({
+          method: 'GET',
+          url: INGESTION_ROUTE,
+          headers: {
+            authorization: `Bearer wrong-token-${attempt}`,
+            cookie: sessionCookie,
+          },
+        });
+
+      expect((await guess(1)).statusCode).toBe(401);
+      expect((await guess(2)).statusCode).toBe(401);
+      expect((await guess(3)).statusCode).toBe(429);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('bounds invalid attempts while leaving public and valid requests available', async () => {
     const app = await createApp(
       createTestConfig(dataDirectory, {

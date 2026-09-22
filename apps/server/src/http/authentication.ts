@@ -215,17 +215,23 @@ export const registerAuthentication = (
       return;
     }
 
-    if (acceptAdministrationSession(request)) {
+    // A bearer token that was offered and did not match is a failed credential
+    // whatever else the request carries, so it never reaches the session check
+    // and always spends the failure limit. Only a request with no ingestion
+    // credential at all can be refused for its scope instead.
+    if (
+      request.headers.authorization === undefined &&
+      acceptAdministrationSession(request)
+    ) {
       if (options.allowAdministrationUploads) {
         return;
       }
 
       // The session is valid, so answering `unauthorized` would tell the
       // administration app that it expired and send the administrator back to
-      // the sign-in screen. The failure limit is left alone for the same
-      // reason: a refused scope is not a failed credential, and counting it
-      // would let one disabled control lock its own administrator out of
-      // signing in again.
+      // the sign-in screen. The failure limit is left alone to match: a
+      // refused scope is not a failed credential, and counting it would let
+      // one disabled control lock its own administrator out of signing in.
       throw new ApiError(
         'forbidden',
         'This server does not accept ingestion from an administration session',

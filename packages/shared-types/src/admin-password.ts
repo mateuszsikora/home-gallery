@@ -43,8 +43,10 @@ export const adminAuthStatusSchema = z
     /**
      * Whether an administration session may reach the ingestion-only upload
      * route. Published so the studio can hide a control the server refuses.
+     * Defaulted, so a newer application reading an older server that does not
+     * publish it yet hides the control rather than failing to open at all.
      */
-    administrationUploadsEnabled: z.boolean(),
+    administrationUploadsEnabled: z.boolean().default(false),
     passwordConfigured: z.boolean(),
   })
   .strict();
