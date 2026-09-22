@@ -229,7 +229,7 @@ describe('credential rotation and rate limiting', () => {
       // cannot lock the administrator out of signing in again.
       expect(refused.statusCode).toBe(403);
       expect(apiErrorBodySchema.parse(refused.json()).error.code).toBe(
-        'administration_uploads_disabled',
+        'administration_ingestion_disabled',
       );
       expect((await disabledUpload()).statusCode).toBe(403);
       expect((await disabledUpload()).statusCode).toBe(403);

@@ -144,9 +144,14 @@ describe('telegram contributor routes', () => {
         payload: { telegramUserId: '123' },
       });
 
-      // `forbidden`, not `unauthorized`: the session itself is still valid, and
-      // 401 is what tells the administration app that one has expired.
+      // 403, not `unauthorized`: the session itself is still valid, and 401 is
+      // what tells the administration app that one has expired. The code is the
+      // one the shared ingestion guard raises, and it has to stay true here as
+      // well as on the upload route, so it names ingestion rather than uploads.
       expect(response.statusCode).toBe(403);
+      expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
+        'administration_ingestion_disabled',
+      );
       expect(app.telegramContributorRepository.list()).toEqual([]);
     });
   });

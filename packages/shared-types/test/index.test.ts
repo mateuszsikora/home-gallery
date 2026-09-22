@@ -135,7 +135,7 @@ describe('error contracts', () => {
     // these share does not say which of them answered.
     expect(API_ERROR_STATUS.forbidden).toBe(403);
     expect(API_ERROR_STATUS.invalid_password).toBe(403);
-    expect(API_ERROR_STATUS.administration_uploads_disabled).toBe(403);
+    expect(API_ERROR_STATUS.administration_ingestion_disabled).toBe(403);
     expect(
       apiErrorBodySchema.safeParse(
         createApiErrorBody('invalid_password', 'Wrong password'),

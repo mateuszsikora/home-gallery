@@ -363,7 +363,7 @@ describe('POST /api/media', () => {
     // does not have to read that cause out of the status.
     expect(response.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
-      'administration_uploads_disabled',
+      'administration_ingestion_disabled',
     );
     await expectEmptyStorage();
   });

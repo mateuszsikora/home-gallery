@@ -10,10 +10,12 @@ export const API_ERROR_CODES = [
   'unauthorized',
   // Several unrelated guards refuse with 403, so the causes a client acts on
   // differently carry their own code. `forbidden` stays the refusal whose cause
-  // the response does not name, and no client may read a cause into it.
+  // the response does not name, and no client may read a cause into it. A named
+  // code must hold on every route that can produce it, or it becomes the same
+  // wrong inference one layer down.
   'forbidden',
   'invalid_password',
-  'administration_uploads_disabled',
+  'administration_ingestion_disabled',
   'not_found',
   'conflict',
   'payload_too_large',
@@ -52,7 +54,7 @@ export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
   unauthorized: 401,
   forbidden: 403,
   invalid_password: 403,
-  administration_uploads_disabled: 403,
+  administration_ingestion_disabled: 403,
   not_found: 404,
   conflict: 409,
   payload_too_large: 413,

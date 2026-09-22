@@ -600,11 +600,12 @@ export const AdminApp = ({
       setSelectedFileName(undefined);
       setNotice(`${file.name} was uploaded and added to the gallery.`);
     } catch (reason) {
-      // Only this code says the deployment itself refuses browser uploads, so
-      // a capability turned off after the studio opened withdraws the control
+      // Only this code says the deployment itself refuses ingestion from this
+      // session, which on this route means the upload capability is off, so a
+      // capability turned off after the studio opened withdraws the control
       // instead of repeating a failure. Any other refusal leaves the control
       // in place, because it is not evidence that uploading stopped working.
-      if (hasErrorCode(reason, 'administration_uploads_disabled')) {
+      if (hasErrorCode(reason, 'administration_ingestion_disabled')) {
         setUploadsEnabled(false);
         setSelectedFileName(undefined);
         setError('Browser uploads are disabled on this server.');

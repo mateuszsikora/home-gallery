@@ -578,7 +578,7 @@ describe('AdminApp', () => {
     mocks.uploadMedia.mockRejectedValueOnce(
       new HomeGalleryApiError(403, 'Refused', {
         error: {
-          code: 'administration_uploads_disabled',
+          code: 'administration_ingestion_disabled',
           message:
             'This server does not accept ingestion from an administration session',
         },

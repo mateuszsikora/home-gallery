@@ -19,8 +19,12 @@ import type { FixedWindowRateLimiter, RateLimitResult } from './rate-limit.js';
 const BEARER_SCHEME = 'bearer';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-/** How an administration credential failure is named to the client. */
-type AdministrationRejectionCode = 'invalid_password' | 'unauthorized';
+/**
+ * How a failed credential check is named to the client, on either scope.
+ * `invalid_password` is reserved for a route that already holds a valid session
+ * and is only rejecting the password it was given.
+ */
+type CredentialRejectionCode = 'invalid_password' | 'unauthorized';
 
 /**
  * Compares two secrets without leaking their contents through timing. Hashing
@@ -88,7 +92,7 @@ declare module 'fastify' {
       request: FastifyRequest,
       reply: Parameters<onRequestHookHandler>[1],
       message?: string,
-      code?: AdministrationRejectionCode,
+      code?: CredentialRejectionCode,
     ) => never;
     requireAdministrationSession: onRequestHookHandler;
     requireIngestionToken: onRequestHookHandler;
@@ -140,7 +144,7 @@ export const registerAuthentication = (
     reply: Parameters<onRequestHookHandler>[1],
     scope: 'administration' | 'ingestion',
     message: string,
-    code: AdministrationRejectionCode = 'unauthorized',
+    code: CredentialRejectionCode = 'unauthorized',
   ): never => {
     enforceLimit(
       request,
@@ -197,7 +201,7 @@ export const registerAuthentication = (
       request,
       reply,
       message = 'A valid administration session is required',
-      code: AdministrationRejectionCode = 'unauthorized',
+      code: CredentialRejectionCode = 'unauthorized',
     ) => reject(request, reply, 'administration', message, code),
   );
 
@@ -233,14 +237,16 @@ export const registerAuthentication = (
 
       // The session is valid, so answering `unauthorized` would tell the
       // administration app that it expired and send the administrator back to
-      // the sign-in screen. Its own code says which guard spoke, so the app can
-      // withdraw the upload control on this refusal alone and report every
-      // other 403 on the route as itself. The failure limit is left alone to
-      // match: a refused scope is not a failed credential, and counting it
-      // would let one disabled control lock its own administrator out of
-      // signing in.
+      // the sign-in screen. Its own code says which guard spoke, so a client
+      // can act on this refusal alone and report every other 403 on the route
+      // as itself. The code names ingestion rather than uploads because this
+      // guard also covers contributor registration, and a code has to stay
+      // true on every route that can produce it. The failure limit is left
+      // alone to match: a refused scope is not a failed credential, and
+      // counting it would let one disabled control lock its own administrator
+      // out of signing in.
       throw new ApiError(
-        'administration_uploads_disabled',
+        'administration_ingestion_disabled',
         'This server does not accept ingestion from an administration session',
       );
     }
