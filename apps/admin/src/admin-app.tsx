@@ -27,6 +27,7 @@ import {
   UsersIcon,
 } from './icons.js';
 import type {
+  ApiErrorCode,
   GallerySettings,
   ImageFit,
   MediaRecord,
@@ -217,13 +218,13 @@ const isUnauthorized = (error: unknown): boolean =>
   error instanceof HomeGalleryApiError && error.status === 401;
 
 /**
- * Everything the server refuses while the session is still valid — a rejected
- * current password, an upload the deployment does not accept — is answered
- * with 403, so none of it can be mistaken for the expired session that 401
- * always means here.
+ * A refusal is identified by the code the API sends, never by the status that
+ * carries it: several unrelated guards answer 403 on the same route, so the
+ * status cannot say which one spoke. A refusal this app does not recognize is
+ * reported as itself rather than explained away as the nearest known cause.
  */
-const isForbidden = (error: unknown): boolean =>
-  error instanceof HomeGalleryApiError && error.status === 403;
+const hasErrorCode = (error: unknown, code: ApiErrorCode): boolean =>
+  error instanceof HomeGalleryApiError && error.code === code;
 
 const formatTimestamp = (timestamp: string): string =>
   new Intl.DateTimeFormat('en', {
@@ -501,7 +502,7 @@ export const AdminApp = ({
         'The administration password was saved. Other signed-in browsers were locked out.',
       );
     } catch (reason) {
-      if (isForbidden(reason)) {
+      if (hasErrorCode(reason, 'invalid_password')) {
         setError('The current password is incorrect.');
       } else {
         handleActionFailure(reason, 'The password could not be saved.');
@@ -535,7 +536,7 @@ export const AdminApp = ({
         'The administration password was removed. Anyone on this network can now open the studio.',
       );
     } catch (reason) {
-      if (isForbidden(reason)) {
+      if (hasErrorCode(reason, 'invalid_password')) {
         setError('The current password is incorrect.');
       } else {
         handleActionFailure(reason, 'The password could not be removed.');
@@ -599,10 +600,11 @@ export const AdminApp = ({
       setSelectedFileName(undefined);
       setNotice(`${file.name} was uploaded and added to the gallery.`);
     } catch (reason) {
-      // The server refuses a browser upload with 403, so a deployment that
-      // turned the capability off after this studio opened says so plainly and
-      // withdraws the control instead of repeating a failure.
-      if (isForbidden(reason)) {
+      // Only this code says the deployment itself refuses browser uploads, so
+      // a capability turned off after the studio opened withdraws the control
+      // instead of repeating a failure. Any other refusal leaves the control
+      // in place, because it is not evidence that uploading stopped working.
+      if (hasErrorCode(reason, 'administration_uploads_disabled')) {
         setUploadsEnabled(false);
         setSelectedFileName(undefined);
         setError('Browser uploads are disabled on this server.');

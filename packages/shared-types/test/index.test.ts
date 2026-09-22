@@ -129,6 +129,19 @@ describe('error contracts', () => {
     expect(apiErrorBodySchema.parse(body)).toEqual(body);
     expect(API_ERROR_STATUS[body.error.code]).toBe(422);
   });
+
+  it('gives each named refusal its own code under one shared status', () => {
+    // A client that acts on a cause has to read the code, because the status
+    // these share does not say which of them answered.
+    expect(API_ERROR_STATUS.forbidden).toBe(403);
+    expect(API_ERROR_STATUS.invalid_password).toBe(403);
+    expect(API_ERROR_STATUS.administration_uploads_disabled).toBe(403);
+    expect(
+      apiErrorBodySchema.safeParse(
+        createApiErrorBody('invalid_password', 'Wrong password'),
+      ).success,
+    ).toBe(true);
+  });
 });
 
 describe('administration session contract', () => {

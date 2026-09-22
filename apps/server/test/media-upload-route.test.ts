@@ -334,7 +334,7 @@ describe('POST /api/media', () => {
     expect(response.statusCode).toBe(201);
   });
 
-  it('refuses a browser upload as forbidden while administration uploads are off', async () => {
+  it('names the deployment setting when a browser upload is refused', async () => {
     const { boundary, payload } = multipartBody(
       [
         { name: 'originalFilename', value: 'family-photo.png' },
@@ -358,7 +358,46 @@ describe('POST /api/media', () => {
     });
 
     // 401 would tell the administration app the session expired, which it has
-    // not; the deployment simply does not accept uploads from a browser.
+    // not; the deployment simply does not accept uploads from a browser. The
+    // code says which of this route's several 403 guards refused, so the app
+    // does not have to read that cause out of the status.
+    expect(response.statusCode).toBe(403);
+    expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
+      'administration_uploads_disabled',
+    );
+    await expectEmptyStorage();
+  });
+
+  it('separates a missing CSRF header from a disabled upload capability', async () => {
+    await app.close();
+    app = await createApp(
+      createTestConfig(dataDirectory, { allowAdministrationUploads: true }),
+    );
+
+    const { boundary, payload } = multipartBody(
+      [
+        { name: 'originalFilename', value: 'family-photo.png' },
+        { name: 'source', value: 'admin' },
+      ],
+      {
+        bytes: await createImage('png'),
+        filename: 'family-photo.png',
+        mimeType: 'image/png',
+      },
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: API_ROUTES.media,
+      headers: {
+        cookie: await createTestAdminSession(app),
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+      },
+      payload,
+    });
+
+    // Both guards answer 403 on this route, so a client that told them apart by
+    // status would report a missing header as a capability the server withdrew.
     expect(response.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
       'forbidden',

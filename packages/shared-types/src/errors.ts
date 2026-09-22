@@ -8,7 +8,12 @@ export const API_ERROR_CODES = [
   'bad_request',
   'validation_failed',
   'unauthorized',
+  // Several unrelated guards refuse with 403, so the causes a client acts on
+  // differently carry their own code. `forbidden` stays the refusal whose cause
+  // the response does not name, and no client may read a cause into it.
   'forbidden',
+  'invalid_password',
+  'administration_uploads_disabled',
   'not_found',
   'conflict',
   'payload_too_large',
@@ -46,6 +51,8 @@ export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
   validation_failed: 422,
   unauthorized: 401,
   forbidden: 403,
+  invalid_password: 403,
+  administration_uploads_disabled: 403,
   not_found: 404,
   conflict: 409,
   payload_too_large: 413,

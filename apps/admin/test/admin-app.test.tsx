@@ -347,12 +347,16 @@ describe('AdminApp', () => {
       expiresAt: '2026-08-02T12:00:00.000Z',
     });
     mocks.setAdminPassword.mockRejectedValueOnce(
-      new HomeGalleryApiError(403, 'The current password is incorrect', {
-        error: {
-          code: 'forbidden',
-          message: 'The current password is incorrect',
+      new HomeGalleryApiError(
+        403,
+        'The current administration password is incorrect',
+        {
+          error: {
+            code: 'invalid_password',
+            message: 'The current administration password is incorrect',
+          },
         },
-      }),
+      ),
     );
 
     render(
@@ -375,6 +379,51 @@ describe('AdminApp', () => {
       'The current password is incorrect.',
     );
     expect(screen.getByRole('heading', { name: 'Library' })).toBeVisible();
+  });
+
+  it('does not blame the password for a refusal that names another cause', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([]);
+    mocks.getAdminAuthStatus.mockResolvedValue(
+      authStatus({ passwordConfigured: true }),
+    );
+    mocks.getAdminSession.mockResolvedValue({
+      expiresAt: '2026-08-02T12:00:00.000Z',
+    });
+    mocks.removeAdminPassword.mockRejectedValueOnce(
+      new HomeGalleryApiError(
+        403,
+        'Cookie-authenticated mutations require x-home-gallery-csrf',
+        {
+          error: {
+            code: 'forbidden',
+            message:
+              'Cookie-authenticated mutations require x-home-gallery-csrf',
+          },
+        },
+      ),
+    );
+
+    render(
+      <AdminApp
+        apiBaseUrl="http://api.test"
+        createClient={() => mocks.client}
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Library' });
+
+    await user.type(
+      screen.getByLabelText('Current password'),
+      'the-house-password',
+    );
+    await user.click(screen.getByRole('button', { name: 'Remove password' }));
+
+    const alert = await screen.findByRole('alert');
+
+    expect(alert).toHaveTextContent('The password could not be removed.');
+    expect(alert).not.toHaveTextContent('The current password is incorrect.');
+    // The password is still set, so the panel must not report it as removed.
+    expect(screen.getByText('Protected')).toBeVisible();
   });
 
   it('removes the password and warns that the panel reopened', async () => {
@@ -529,7 +578,7 @@ describe('AdminApp', () => {
     mocks.uploadMedia.mockRejectedValueOnce(
       new HomeGalleryApiError(403, 'Refused', {
         error: {
-          code: 'forbidden',
+          code: 'administration_uploads_disabled',
           message:
             'This server does not accept ingestion from an administration session',
         },
@@ -556,6 +605,49 @@ describe('AdminApp', () => {
     );
     expect(screen.getByRole('heading', { name: 'Library' })).toBeVisible();
     expect(screen.queryByLabelText('Add a photograph')).toBeNull();
+  });
+
+  it('keeps the uploader for a refusal that does not name the upload capability', async () => {
+    const mocks = createClientMocks([]);
+    // `POST /api/media` answers 403 from more than one guard. Only the disabled
+    // capability means the control is gone, so a refusal that names another
+    // cause is reported as itself and leaves the uploader in place.
+    mocks.uploadMedia.mockRejectedValueOnce(
+      new HomeGalleryApiError(
+        403,
+        'Cookie-authenticated mutations require x-home-gallery-csrf',
+        {
+          error: {
+            code: 'forbidden',
+            message:
+              'Cookie-authenticated mutations require x-home-gallery-csrf',
+          },
+        },
+      ),
+    );
+    await openStudio(mocks.client);
+
+    const uploadInput = screen.getByLabelText('Add a photograph');
+    fireEvent.change(uploadInput, {
+      target: { files: [new File(['image bytes'], 'new-frame.jpg')] },
+    });
+    const uploadForm = uploadInput.closest('form');
+
+    if (uploadForm === null) {
+      throw new Error('Upload form was not rendered');
+    }
+
+    fireEvent.submit(uploadForm);
+
+    const alert = await screen.findByRole('alert');
+
+    expect(alert).toHaveTextContent('The image could not be uploaded.');
+    expect(alert).toHaveTextContent(
+      'Cookie-authenticated mutations require x-home-gallery-csrf',
+    );
+    expect(alert).not.toHaveTextContent('Browser uploads are disabled');
+    expect(screen.getByLabelText('Add a photograph')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload photo' })).toBeVisible();
   });
 
   it('changes visibility and reorders media deterministically', async () => {
