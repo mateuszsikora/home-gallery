@@ -82,7 +82,7 @@ A fresh installation has no administration password, and anyone who can reach th
 
 `currentPassword` is required exactly when a password is already configured. `DELETE /api/admin/password` takes the same session, the same CSRF header, and a body with only `currentPassword`; it returns the installation to the unprotected default, and answers `409` with error code `conflict` when there is no password to remove. Both routes return `204 No Content` on success, invalidate every other administration session, and keep the calling session valid.
 
-A password is 8 to 128 characters and may not contain control characters. A wrong `currentPassword` is answered with `403` and error code `invalid_password`, which distinguishes it from the `401` that an expired session produces and from every other refusal that shares the `403`. That code belongs to these two routes: sign-in reports a rejected password as `401 unauthorized`, because there no session exists to keep valid. Passwords are stored only as salted scrypt hashes, are never logged, and are never returned by the API.
+A password is 8 to 128 characters and may not contain control characters. A wrong `currentPassword` is answered with `403` and error code `invalid_password`, which distinguishes it from the `401` that an expired session produces and from every other refusal that shares the `403`. That code belongs to these two routes: sign-in reports a rejected password as `401 unauthorized`, because no session exists there to keep valid. Passwords are stored only as salted scrypt hashes, are never logged, and are never returned by the API.
 
 ### Browser administration session
 
