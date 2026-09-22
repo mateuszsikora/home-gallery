@@ -1,14 +1,14 @@
 # Home Gallery
 
+[![CI](https://github.com/mateuszsikora/home-gallery/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mateuszsikora/home-gallery/actions/workflows/ci.yml)
+
 Self-hosted photo frame for your home: family and friends send photos to a Telegram bot, and the photos appear in a fullscreen browser slideshow on whatever screen you point at it. A separate administration app manages the library, the playback settings, and who is allowed to contribute.
 
 Everything runs on your own hardware, on your own network. In the default profile the only service Home Gallery talks to at runtime is the Telegram Bot API; pulling the images needs GHCR, and the optional TLS profile adds an ACME provider.
 
-![The fullscreen gallery playing a photo](docs/screenshots/gallery-desktop.png)
-
 ## Where this came from
 
-Home Gallery started as a screensaver for my [Glance](https://github.com/glanceapp/glance) dashboard — I wanted the screen showing Glance to fall back to family photos instead of going blank. That is why the gallery is its own bare URL at `/` with no navigation, no controls, and nothing to click: you open it in a kiosk or fullscreen tab and walk away. It then grew the parts a shared photo frame actually needs — a way for other people to add photos without touching the server, and a way for me to curate what ends up on the wall.
+Home Gallery started as a screensaver for [Glance](https://github.com/mateuszsikora/glance), my Android kiosk for an always-on wall display — I wanted the screen showing the dashboard to fall back to family photos instead of going blank. That is why the gallery is its own bare URL at `/` with no navigation, no controls, and nothing to click: you open it in a kiosk or fullscreen tab and walk away. It then grew the parts a shared photo frame actually needs — a way for other people to add photos without touching the server, and a way for me to curate what ends up on the wall.
 
 Note that the shipped images send `X-Frame-Options: DENY` and `frame-ancestors 'none'`, so the gallery is meant to be opened as its own tab or window rather than embedded in a dashboard iframe. Relaxing that is a deliberate change to `docker/web.conf`.
 
@@ -53,7 +53,7 @@ A contributor writes to the bot. Their first message creates a pending access re
 
 ![The administration app managing the library, Telegram contributors, playback settings, and the administration password](docs/screenshots/admin-desktop.png)
 
-The upload control visible in the screenshot is always rendered, but the server rejects browser uploads unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`. Both interfaces reflow for narrow screens — see [the gallery](docs/screenshots/gallery-narrow.png) and [the administration app](docs/screenshots/admin-narrow.png) on a phone.
+The upload control visible in the screenshot is always rendered, but the server rejects browser uploads unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`. The administration app [reflows for narrow screens](docs/screenshots/admin-narrow.png), and [the gallery on a portrait screen](docs/screenshots/gallery-narrow.png) shows the blurred-edges fit mode filling the space a landscape photo leaves behind.
 
 ## Quick start with Docker Compose
 
@@ -210,7 +210,7 @@ Home Gallery is developed by coding agents, one GitHub issue per pull request. A
 
 ## Status and contributing
 
-This is a personal project, published so others can read, fork, and adapt it. It is maintained on a best-effort basis: issues and pull requests are welcome, but there is no support commitment and no release schedule. Run it on a trusted network and read [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
+This is a personal project, published so others can read, fork, and adapt it, and maintained on a best-effort basis. Issues and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) covers what a useful bug report needs and the bar a pull request has to clear. Run it on a trusted network and read [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
 
 ## License
 

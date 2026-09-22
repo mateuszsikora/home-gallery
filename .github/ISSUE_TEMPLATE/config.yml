@@ -1,0 +1,13 @@
+# The backlog is an agent work queue whose items are neither bug reports nor
+# feature requests, so a blank issue stays available. Security reports are kept
+# out of public issues by the contact link below, the banner on the bug form,
+# and SECURITY.md, not by this flag.
+blank_issues_enabled: true
+
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/mateuszsikora/home-gallery/security/advisories/new
+    about: Report privately through a security advisory. Never in a public issue.
+  - name: Deployment, backup, restore, and TLS documentation
+    url: https://github.com/mateuszsikora/home-gallery/blob/main/docs/DEPLOYMENT.md
+    about: Check the deployment guide before opening an issue about running the stack.

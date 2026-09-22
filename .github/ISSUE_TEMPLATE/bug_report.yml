@@ -1,0 +1,94 @@
+name: Bug report
+description: Something behaves differently than the documentation says it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a suspected vulnerability here. Use [private reporting](https://github.com/mateuszsikora/home-gallery/security/advisories/new) instead.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Fullscreen gallery
+        - Administration app
+        - API server
+        - Telegram bot
+        - Deployment, Compose, backup, or restore
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what the software did, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it
+      description: The shortest sequence that shows the problem, including the request or the photo that triggers it.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Deployment profile
+      options:
+        - Default plain HTTP on a trusted LAN
+        - TLS profile with Caddy
+        - Local development outside Compose
+        - Not applicable, no running deployment
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - Pulled GHCR images through infra/deploy.sh
+        - Pulled GHCR images through docker compose directly
+        - Built from source with --build
+        - Not applicable, no running deployment
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The image tag you ran, or the commit you built. `sha-<commit>` tags identify a build exactly; `latest` does not. Leave this blank if you are not running a deployment.
+      placeholder: sha-1a2b3c4d5e6f
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server or bot output from around the failure. This is pasted into a code block, so no backticks are needed.
+      render: text
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: The `HOME_GALLERY_*` settings that bear on the problem.
+      render: text
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed every token, password, and other credential from the text above.
+          required: true
+        - label: This is not a security vulnerability report.
+          required: true
