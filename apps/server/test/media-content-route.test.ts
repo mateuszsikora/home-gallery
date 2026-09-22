@@ -6,10 +6,10 @@ import { createApp } from '../src/app.js';
 import { ADMIN_SESSION_COOKIE_NAME } from '../src/http/admin-session-routes.js';
 import {
   createTemporaryDataDirectory,
+  createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
   storeTestMedia,
-  TEST_API_TOKEN,
 } from './helpers.js';
 
 const UNKNOWN_ID = '3f0f2c6c-2b1a-4a4f-9f2c-8f5a1d1c0f9b';
@@ -142,33 +142,13 @@ describe('GET /api/media/{id}/content', () => {
     });
   };
 
-  /** The cookie an administration browser session sends with every preview. */
-  const createSessionCookie = async (): Promise<string> => {
-    const response = await app.inject({
-      method: 'POST',
-      url: API_ROUTES.adminSession,
-      headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
-    });
-    const setCookie = response.headers['set-cookie'];
-    const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)?.split(
-      ';',
-      1,
-    )[0];
-
-    if (cookie === undefined) {
-      throw new Error('Expected a session cookie');
-    }
-
-    return cookie;
-  };
-
   it('streams hidden media to a browser session and forbids storing it', async () => {
     const { record, bytes } = await storeTestMedia(app, { enabled: false });
 
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.adminMediaContentById(record.id),
-      headers: { cookie: await createSessionCookie() },
+      headers: { cookie: await createTestAdminSession(app) },
     });
 
     expect(response.statusCode).toBe(200);
@@ -178,13 +158,13 @@ describe('GET /api/media/{id}/content', () => {
     expect(response.rawPayload.equals(bytes)).toBe(true);
   });
 
-  it('streams visible media to a bearer token as well', async () => {
+  it('streams visible media to the same session as well', async () => {
     const { record, bytes } = await storeTestMedia(app);
 
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.adminMediaContentById(record.id),
-      headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
+      headers: { cookie: await createTestAdminSession(app) },
     });
 
     expect(response.statusCode).toBe(200);
@@ -201,7 +181,7 @@ describe('GET /api/media/{id}/content', () => {
     const unknown = await app.inject({
       method: 'GET',
       url: API_ROUTES.adminMediaContentById(UNKNOWN_ID),
-      headers: { cookie: await createSessionCookie() },
+      headers: { cookie: await createTestAdminSession(app) },
     });
 
     expectUnavailable(anonymous.statusCode, anonymous.json());
@@ -227,7 +207,7 @@ describe('GET /api/media/{id}/content', () => {
     const response = await app.inject({
       method: 'GET',
       url: API_ROUTES.adminMediaContentById(record.id),
-      headers: { cookie: await createSessionCookie() },
+      headers: { cookie: await createTestAdminSession(app) },
     });
 
     expectUnavailable(response.statusCode, response.json());

@@ -4,8 +4,8 @@ The shared runtime schemas and TypeScript types live in `@home-gallery/shared-ty
 
 ## Conventions
 
-- Protected routes accept `Authorization: Bearer <token>`. Administration and ingestion use independent credentials, and tokens are never accepted in a URL. Administration routes also accept a valid browser session cookie created by the session endpoint.
-- Cookie-authenticated `POST`, `PATCH`, and `DELETE` requests require `X-Home-Gallery-CSRF: 1`. Bearer clients do not need this header.
+- Administration routes require the browser session cookie created by the session endpoint. Ingestion routes require `Authorization: Bearer <token>`; the ingestion token is never accepted in a URL. The two scopes are independent, and neither credential is accepted on the other's routes.
+- Cookie-authenticated `POST`, `PATCH`, and `DELETE` requests require `X-Home-Gallery-CSRF: 1`. Ingestion bearer clients do not need this header.
 - JSON requests use `Content-Type: application/json` and JSON responses use `Content-Type: application/json`.
 - Timestamps are ISO 8601 UTC strings.
 - Media IDs are UUIDs. Pagination cursors are opaque and clients must return them unchanged.
@@ -37,9 +37,12 @@ Every non-successful response uses this shape:
 
 | Method   | Path                                          | Access        | Request                             | Successful response                |
 | -------- | --------------------------------------------- | ------------- | ----------------------------------- | ---------------------------------- |
-| `POST`   | `/api/admin/session`                          | Admin bearer  | None                                | Session expiry                     |
+| `GET`    | `/api/admin/auth`                             | Public        | None                                | Whether a password is configured   |
+| `POST`   | `/api/admin/session`                          | Password      | CSRF header, optional password      | Session expiry                     |
 | `GET`    | `/api/admin/session`                          | Admin session | None                                | Session expiry                     |
 | `DELETE` | `/api/admin/session`                          | Admin session | CSRF header                         | `204 No Content`                   |
+| `PUT`    | `/api/admin/password`                         | Admin session | CSRF header, password change        | `204 No Content`                   |
+| `DELETE` | `/api/admin/password`                         | Admin session | CSRF header, current password       | `204 No Content`                   |
 | `GET`    | `/health`                                     | Public        | None                                | Health status                      |
 | `POST`   | `/api/media`                                  | Ingest        | Multipart image and attribution     | Media record                       |
 | `GET`    | `/api/media`                                  | Admin         | Optional `cursor` and `limit` query | Paginated media list               |
@@ -55,9 +58,40 @@ Every non-successful response uses this shape:
 | `GET`    | `/api/telegram/contributors`                  | Admin         | None                                | Contributor list                   |
 | `PATCH`  | `/api/telegram/contributors/{telegramUserId}` | Admin         | Approval decision                   | Updated contributor record         |
 
+### Administration password
+
+A fresh installation has no administration password, and anyone who can reach the server can open the studio. `GET /api/admin/auth` is public and reports the current state so the administration app knows which sign-in screen to render:
+
+```json
+{
+  "passwordConfigured": false
+}
+```
+
+`PUT /api/admin/password` sets or changes the password. It needs an administration session, `X-Home-Gallery-CSRF: 1`, and a body of:
+
+```json
+{
+  "currentPassword": "the-password-in-use",
+  "newPassword": "the-password-to-use"
+}
+```
+
+`currentPassword` is required exactly when a password is already configured. `DELETE /api/admin/password` takes the same session, the same CSRF header, and a body with only `currentPassword`; it returns the installation to the unprotected default. Both routes return `204 No Content`, invalidate every other administration session, and keep the calling session valid.
+
+A password is 8 to 128 characters and may not contain control characters. A wrong `currentPassword` is answered with `403` and error code `forbidden`, which distinguishes it from the `401` that an expired session produces. Passwords are stored only as salted scrypt hashes, are never logged, and are never returned by the API.
+
 ### Browser administration session
 
-`POST /api/admin/session` validates an administration bearer and returns `201 Created` while setting an opaque `home_gallery_admin_session` cookie. The cookie is `HttpOnly`, `SameSite=Strict`, scoped to `/`, and marked `Secure` in the supported TLS profile. The response exposes only the server-side expiry:
+`POST /api/admin/session` returns `201 Created` while setting an opaque `home_gallery_admin_session` cookie. The cookie is `HttpOnly`, `SameSite=Strict`, scoped to `/`, and marked `Secure` in the supported TLS profile. The request requires `X-Home-Gallery-CSRF: 1`, so a cross-origin page cannot open a session without passing a preflight. When a password is configured the body must carry it; otherwise the body is empty:
+
+```json
+{
+  "password": "the-password-in-use"
+}
+```
+
+The response exposes only the server-side expiry:
 
 ```json
 {
@@ -65,7 +99,7 @@ Every non-successful response uses this shape:
 }
 ```
 
-`GET /api/admin/session` restores a valid cookie session. `DELETE /api/admin/session` requires `X-Home-Gallery-CSRF: 1`, removes the server-side session, clears the cookie, and returns `204 No Content`. Sessions are held only in bounded process memory: the default lifetime is eight hours, the default capacity is 64, the oldest live session is evicted at capacity, and every server restart invalidates all sessions. The administration bearer remains supported directly on protected routes for non-browser API clients.
+`GET /api/admin/session` restores a valid cookie session. `DELETE /api/admin/session` requires `X-Home-Gallery-CSRF: 1`, removes the server-side session, clears the cookie, and returns `204 No Content`. Sessions are held only in bounded process memory: the default lifetime is eight hours, the default capacity is 64, the oldest live session is evicted at capacity, and every server restart invalidates all sessions. A rejected password consumes the same authentication rate limit as any other failed credential.
 
 ### Health
 
@@ -83,7 +117,7 @@ The healthy response uses HTTP `200`. If the database readiness probe fails, the
 
 `POST /api/media` uses `multipart/form-data` with these fields:
 
-The ingestion credential is required. An administration credential is accepted only when the operator explicitly enables administration uploads.
+The ingestion credential is required. An administration session is accepted only when the operator explicitly enables administration uploads.
 
 | Field              | Required | Description                                                           |
 | ------------------ | -------- | --------------------------------------------------------------------- |
@@ -169,7 +203,7 @@ Items are listed in playlist order. `settings.playbackMode` tells the client whe
 
 `GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response, and all three cases answer identically so an unauthenticated caller cannot tell them apart. Successful responses are immutable and carry an ETag, because stored bytes never change.
 
-`GET /api/media/{id}/content` returns the same bytes for a disabled item as well, which is how the administration app previews a photo it has hidden. It accepts the administration bearer token or the session cookie, so a plain `<img>` element authenticates itself, and it answers `no-store` because visibility is mutable state. A caller without a valid credential gets the same `not_found` response as one asking for an identifier that does not exist.
+`GET /api/media/{id}/content` returns the same bytes for a disabled item as well, which is how the administration app previews a photo it has hidden. It accepts the session cookie, so a plain `<img>` element authenticates itself, and it answers `no-store` because visibility is mutable state. A caller without a valid credential gets the same `not_found` response as one asking for an identifier that does not exist.
 
 ### Telegram contributors
 

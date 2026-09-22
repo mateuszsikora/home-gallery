@@ -14,22 +14,24 @@ import type {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
-import { ADMIN_SESSION_COOKIE_NAME } from '../src/http/admin-session-routes.js';
 import {
+  adminMutationHeaders,
   createTemporaryDataDirectory,
+  createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
-  TEST_API_TOKEN,
   TEST_INGESTION_TOKEN,
 } from './helpers.js';
 
 describe('telegram contributor routes', () => {
   let dataDirectory: string;
   let app: FastifyInstance;
+  let sessionCookie: string;
 
   beforeEach(async () => {
     dataDirectory = await createTemporaryDataDirectory();
     app = await createApp(createTestConfig(dataDirectory));
+    sessionCookie = await createTestAdminSession(app);
   });
 
   afterEach(async () => {
@@ -62,21 +64,21 @@ describe('telegram contributor routes', () => {
   ): Promise<LightMyRequestResponse> =>
     call('POST', API_ROUTES.telegramContributors, token, payload);
 
-  const createSessionCookie = async (): Promise<string> => {
-    const response = await app.inject({
-      method: 'POST',
-      url: API_ROUTES.adminSession,
-      headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
-    });
-    const setCookie = response.headers['set-cookie'];
-    const value = Array.isArray(setCookie) ? setCookie[0] : setCookie;
-    const cookie = value?.split(';', 1)[0];
+  /** A `null` cookie sends no administration session at all. */
+  const administrate = (
+    method: 'GET' | 'PATCH',
+    url: string,
+    payload?: Record<string, unknown>,
+    cookie: string | null = sessionCookie,
+  ): Promise<LightMyRequestResponse> => {
+    const options: InjectOptions = {
+      method,
+      url,
+      ...(cookie === null ? {} : { headers: adminMutationHeaders(cookie) }),
+      ...(payload === undefined ? {} : { payload }),
+    };
 
-    if (!cookie?.startsWith(`${ADMIN_SESSION_COOKIE_NAME}=`)) {
-      throw new Error('Expected an administration session cookie');
-    }
-
-    return cookie;
+    return app.inject(options);
   };
 
   describe('POST /api/telegram/contributors', () => {
@@ -127,11 +129,20 @@ describe('telegram contributor routes', () => {
       expect(app.telegramContributorRepository.list()).toEqual([]);
     });
 
-    it.each([
-      ['no credential', null],
-      ['the administration credential', TEST_API_TOKEN],
-    ])('refuses registration with %s', async (_case, token) => {
-      const response = await register({ telegramUserId: '123' }, token);
+    it('refuses registration with no credential', async () => {
+      const response = await register({ telegramUserId: '123' }, null);
+
+      expect(response.statusCode).toBe(401);
+      expect(app.telegramContributorRepository.list()).toEqual([]);
+    });
+
+    it('refuses registration from an administration session', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: API_ROUTES.telegramContributors,
+        headers: adminMutationHeaders(sessionCookie),
+        payload: { telegramUserId: '123' },
+      });
 
       expect(response.statusCode).toBe(401);
       expect(app.telegramContributorRepository.list()).toEqual([]);
@@ -142,10 +153,9 @@ describe('telegram contributor routes', () => {
     it('lists contributors for an administrator', async () => {
       await register({ telegramUserId: '123', firstName: 'Ada' });
 
-      const response = await call(
+      const response = await administrate(
         'GET',
         API_ROUTES.telegramContributors,
-        TEST_API_TOKEN,
       );
 
       expect(response.statusCode).toBe(200);
@@ -172,11 +182,14 @@ describe('telegram contributor routes', () => {
     const decide = (
       telegramUserId: string,
       status: string,
-      token: string | null = TEST_API_TOKEN,
+      cookie: string | null = sessionCookie,
     ): Promise<LightMyRequestResponse> =>
-      call('PATCH', API_ROUTES.telegramContributorById(telegramUserId), token, {
-        status,
-      });
+      administrate(
+        'PATCH',
+        API_ROUTES.telegramContributorById(telegramUserId),
+        { status },
+        cookie,
+      );
 
     it('approves and rejects a contributor', async () => {
       await register({ telegramUserId: '123', firstName: 'Ada' });
@@ -219,13 +232,10 @@ describe('telegram contributor routes', () => {
       );
     });
 
-    it.each([
-      ['no credential', null],
-      ['the ingestion credential', TEST_INGESTION_TOKEN],
-    ])('refuses a decision made with %s', async (_case, token) => {
+    it('refuses a decision made with no credential', async () => {
       await register({ telegramUserId: '123' });
 
-      const response = await decide('123', 'approved', token);
+      const response = await decide('123', 'approved', null);
 
       expect(response.statusCode).toBe(401);
       expect(
@@ -233,26 +243,41 @@ describe('telegram contributor routes', () => {
       ).toBe('pending');
     });
 
-    it('accepts a browser session and requires CSRF for its decision', async () => {
+    it('refuses a decision made with the ingestion credential', async () => {
       await register({ telegramUserId: '123' });
-      const cookie = await createSessionCookie();
+
+      const response = await call(
+        'PATCH',
+        API_ROUTES.telegramContributorById('123'),
+        TEST_INGESTION_TOKEN,
+        { status: 'approved' },
+      );
+
+      expect(response.statusCode).toBe(401);
+      expect(
+        app.telegramContributorRepository.findByTelegramUserId('123')?.status,
+      ).toBe('pending');
+    });
+
+    it('requires CSRF for a session decision', async () => {
+      await register({ telegramUserId: '123' });
 
       const listed = await app.inject({
         method: 'GET',
         url: API_ROUTES.telegramContributors,
-        headers: { cookie },
+        headers: { cookie: sessionCookie },
       });
       const withoutCsrf = await app.inject({
         method: 'PATCH',
         url: API_ROUTES.telegramContributorById('123'),
-        headers: { cookie },
+        headers: { cookie: sessionCookie },
         payload: { status: 'approved' },
       });
       const withCsrf = await app.inject({
         method: 'PATCH',
         url: API_ROUTES.telegramContributorById('123'),
         headers: {
-          cookie,
+          cookie: sessionCookie,
           [ADMIN_SESSION_CSRF_HEADER]: ADMIN_SESSION_CSRF_VALUE,
         },
         payload: { status: 'approved' },
@@ -277,10 +302,11 @@ describe('telegram contributor routes', () => {
     await app.close();
     app = await createApp(createTestConfig(dataDirectory));
 
-    const response = await call(
+    const response = await administrate(
       'GET',
       API_ROUTES.telegramContributors,
-      TEST_API_TOKEN,
+      undefined,
+      await createTestAdminSession(app),
     );
     const body = telegramContributorListResponseSchema.parse(response.json());
 

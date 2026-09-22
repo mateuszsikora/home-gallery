@@ -2,6 +2,7 @@ import {
   ADMIN_SESSION_CSRF_HEADER,
   ADMIN_SESSION_CSRF_VALUE,
   API_ROUTES,
+  adminAuthStatusSchema,
   adminSessionSchema,
   apiErrorBodySchema,
 } from '@home-gallery/shared-types';
@@ -11,11 +12,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { ADMIN_SESSION_COOKIE_NAME } from '../src/http/admin-session-routes.js';
 import {
+  adminMutationHeaders,
   createTemporaryDataDirectory,
+  createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
-  TEST_API_TOKEN,
-  TEST_INGESTION_TOKEN,
+  TEST_ADMIN_PASSWORD,
 } from './helpers.js';
 
 const MUTATION_ROUTE = '/test/session-mutation';
@@ -41,7 +43,7 @@ describe('administration session routes', () => {
     app = await createApp(createTestConfig(dataDirectory));
     app.patch(
       MUTATION_ROUTE,
-      { onRequest: app.requireAdministrationToken },
+      { onRequest: app.requireAdministrationSession },
       async () => ({ ok: true }),
     );
   });
@@ -51,21 +53,39 @@ describe('administration session routes', () => {
     await removeTemporaryDataDirectory(dataDirectory);
   });
 
-  const createSession = async (token = TEST_API_TOKEN) =>
+  const createSession = async (payload: Record<string, unknown> = {}) =>
     app.inject({
       method: 'POST',
       url: API_ROUTES.adminSession,
-      headers: { authorization: `Bearer ${token}` },
+      headers: { [ADMIN_SESSION_CSRF_HEADER]: ADMIN_SESSION_CSRF_VALUE },
+      payload,
     });
 
-  it('creates an opaque HttpOnly strict session only from an admin bearer', async () => {
-    expect((await createSession(TEST_INGESTION_TOKEN)).statusCode).toBe(401);
+  const setPassword = async (cookie: string, newPassword: string) =>
+    app.inject({
+      method: 'PUT',
+      url: API_ROUTES.adminPassword,
+      headers: adminMutationHeaders(cookie),
+      payload: { newPassword },
+    });
 
+  it('reports that a fresh installation has no password', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminAuth,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(adminAuthStatusSchema.parse(response.json())).toEqual({
+      passwordConfigured: false,
+    });
+  });
+
+  it('creates an opaque HttpOnly strict session without a password', async () => {
     const response = await createSession();
 
     expect(response.statusCode).toBe(201);
     expect(adminSessionSchema.parse(response.json()).expiresAt).toMatch(/Z$/u);
-    expect(response.body).not.toContain(TEST_API_TOKEN);
     expect(response.headers['set-cookie']).toContain(
       `${ADMIN_SESSION_COOKIE_NAME}=`,
     );
@@ -73,6 +93,43 @@ describe('administration session routes', () => {
     expect(response.headers['set-cookie']).toContain('SameSite=Strict');
     expect(response.headers['set-cookie']).toContain('Path=/');
     expect(response.headers['set-cookie']).not.toContain('Secure');
+  });
+
+  it('requires the CSRF header to create a session', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: API_ROUTES.adminSession,
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
+      'forbidden',
+    );
+  });
+
+  it('demands the configured password and never echoes it', async () => {
+    const cookie = await createTestAdminSession(app);
+
+    expect((await setPassword(cookie, TEST_ADMIN_PASSWORD)).statusCode).toBe(
+      204,
+    );
+    expect(
+      adminAuthStatusSchema.parse(
+        (await app.inject({ method: 'GET', url: API_ROUTES.adminAuth })).json(),
+      ),
+    ).toEqual({ passwordConfigured: true });
+
+    const withoutPassword = await createSession();
+    const wrongPassword = await createSession({ password: 'not-the-password' });
+    const correctPassword = await createSession({
+      password: TEST_ADMIN_PASSWORD,
+    });
+
+    expect(withoutPassword.statusCode).toBe(401);
+    expect(wrongPassword.statusCode).toBe(401);
+    expect(wrongPassword.body).not.toContain(TEST_ADMIN_PASSWORD);
+    expect(correctPassword.statusCode).toBe(201);
   });
 
   it('sets Secure in the TLS profile', async () => {
@@ -86,7 +143,7 @@ describe('administration session routes', () => {
     expect((await createSession()).headers['set-cookie']).toContain('Secure');
   });
 
-  it('restores a valid session and accepts bearer clients independently', async () => {
+  it('restores a valid session', async () => {
     const created = await createSession();
     const cookie = cookieHeader(created.headers['set-cookie']);
 
@@ -95,15 +152,9 @@ describe('administration session routes', () => {
       url: API_ROUTES.adminSession,
       headers: { cookie },
     });
-    const bearerRequest = await app.inject({
-      method: 'PATCH',
-      url: MUTATION_ROUTE,
-      headers: { authorization: `Bearer ${TEST_API_TOKEN}` },
-    });
 
     expect(restored.statusCode).toBe(200);
     expect(adminSessionSchema.parse(restored.json())).toEqual(created.json());
-    expect(bearerRequest.statusCode).toBe(200);
   });
 
   it('requires the explicit CSRF header for cookie mutations', async () => {
@@ -116,10 +167,7 @@ describe('administration session routes', () => {
     const withCsrf = await app.inject({
       method: 'PATCH',
       url: MUTATION_ROUTE,
-      headers: {
-        cookie,
-        [ADMIN_SESSION_CSRF_HEADER]: ADMIN_SESSION_CSRF_VALUE,
-      },
+      headers: adminMutationHeaders(cookie),
     });
 
     expect(withoutCsrf.statusCode).toBe(403);
@@ -144,10 +192,7 @@ describe('administration session routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: INGESTION_ROUTE,
-      headers: {
-        cookie,
-        [ADMIN_SESSION_CSRF_HEADER]: ADMIN_SESSION_CSRF_VALUE,
-      },
+      headers: adminMutationHeaders(cookie),
     });
 
     expect(response.statusCode).toBe(200);
@@ -169,10 +214,7 @@ describe('administration session routes', () => {
     const loggedOut = await app.inject({
       method: 'DELETE',
       url: API_ROUTES.adminSession,
-      headers: {
-        cookie,
-        [ADMIN_SESSION_CSRF_HEADER]: ADMIN_SESSION_CSRF_VALUE,
-      },
+      headers: adminMutationHeaders(cookie),
     });
 
     expect(loggedOut.statusCode).toBe(204);

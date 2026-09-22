@@ -125,8 +125,9 @@ Configurable options include slide duration, transition duration, playback mode,
 
 ### 10.2 REST API
 
-- Ingestion and administrative operations use independently rotatable bearer-token credentials with separate scopes.
-- Browser administration exchanges its bearer once for a bounded, short-lived, opaque HttpOnly session; cookie-authenticated mutations require explicit CSRF protection.
+- Ingestion uses a rotatable bearer-token credential. Administration is protected by a password the administrator manages from the administration application, which is unset on a fresh installation; the two scopes are independent and neither credential works on the other's routes.
+- The administration password is stored only as a salted scrypt hash, and changing or removing it invalidates every other administration session.
+- Browser administration exchanges the password once for a bounded, short-lived, opaque HttpOnly session; cookie-authenticated mutations require explicit CSRF protection.
 - Administrative endpoints must not be publicly accessible.
 - Uploaded files must be treated as untrusted, validated, and verified before permanent storage.
 - Invalid authentication and excessive upload attempts must be bounded without limiting public gallery playback.

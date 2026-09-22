@@ -1,12 +1,15 @@
 import {
   ADMIN_SESSION_CSRF_HEADER,
-  ADMIN_SESSION_CSRF_VALUE,
   API_ROUTES,
+  adminSessionRequestSchema,
 } from '@home-gallery/shared-types';
 import type { FastifyInstance } from 'fastify';
 
+import type { AdminCredentials } from '../auth/admin-credentials.js';
 import type { AdminSessionStore } from './admin-session-store.js';
+import { hasValidCsrfHeader } from './authentication.js';
 import { ApiError } from './errors.js';
+import { parseRequestBody } from './validation.js';
 
 export const ADMIN_SESSION_COOKIE_NAME = 'home_gallery_admin_session';
 
@@ -17,6 +20,7 @@ const toResponse = (expiresAt: number) => ({
 export const registerAdminSessionRoutes = (
   app: FastifyInstance,
   options: {
+    credentials: AdminCredentials;
     secureCookie: boolean;
     sessionStore: AdminSessionStore;
   },
@@ -28,17 +32,39 @@ export const registerAdminSessionRoutes = (
     secure: options.secureCookie,
   };
 
-  app.post(
-    API_ROUTES.adminSession,
-    { onRequest: app.requireAdministrationBearerToken },
-    async (_request, reply) => {
-      const session = options.sessionStore.create();
-      return reply
-        .status(201)
-        .setCookie(ADMIN_SESSION_COOKIE_NAME, session.token, cookieOptions)
-        .send(toResponse(session.expiresAt));
-    },
-  );
+  app.get(API_ROUTES.adminAuth, async () => ({
+    passwordConfigured: options.credentials.isPasswordConfigured(),
+  }));
+
+  app.post(API_ROUTES.adminSession, async (request, reply) => {
+    // Requiring the header forces a preflight on any cross-origin attempt, so
+    // an unrelated page cannot open a session against a passwordless gallery.
+    if (!hasValidCsrfHeader(request)) {
+      throw new ApiError(
+        'forbidden',
+        `Session creation requires ${ADMIN_SESSION_CSRF_HEADER}`,
+      );
+    }
+
+    const { password } = parseRequestBody(
+      adminSessionRequestSchema,
+      request.body ?? {},
+    );
+
+    if (!options.credentials.accepts(password)) {
+      app.rejectAdministrationAttempt(
+        request,
+        reply,
+        'The administration password is incorrect',
+      );
+    }
+
+    const session = options.sessionStore.create();
+    return reply
+      .status(201)
+      .setCookie(ADMIN_SESSION_COOKIE_NAME, session.token, cookieOptions)
+      .send(toResponse(session.expiresAt));
+  });
 
   app.get(
     API_ROUTES.adminSession,
@@ -48,9 +74,7 @@ export const registerAdminSessionRoutes = (
   );
 
   app.delete(API_ROUTES.adminSession, async (request, reply) => {
-    if (
-      request.headers[ADMIN_SESSION_CSRF_HEADER] !== ADMIN_SESSION_CSRF_VALUE
-    ) {
+    if (!hasValidCsrfHeader(request)) {
       throw new ApiError(
         'forbidden',
         `Session logout requires ${ADMIN_SESSION_CSRF_HEADER}`,

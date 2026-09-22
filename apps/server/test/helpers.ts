@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ServerConfig } from '@home-gallery/config';
+import {
+  ADMIN_SESSION_CSRF_HEADER,
+  ADMIN_SESSION_CSRF_VALUE,
+  API_ROUTES,
+} from '@home-gallery/shared-types';
 import type { MediaRecord } from '@home-gallery/shared-types';
 import type { FastifyInstance } from 'fastify';
 
@@ -11,12 +16,53 @@ import {
   openDatabase,
   type DatabaseConnection,
 } from '../src/database/connection.js';
+import { ADMIN_SESSION_COOKIE_NAME } from '../src/http/admin-session-routes.js';
 import { migrate } from '../src/database/migrations.js';
 import type { CreateMediaInput } from '../src/database/media-repository.js';
 
-export const TEST_API_TOKEN = 'test-token-0123456789abcdef0123456789ab';
 export const TEST_INGESTION_TOKEN =
   'ingestion-token-0123456789abcdef0123456789';
+export const TEST_ADMIN_PASSWORD = 'test-administration-password';
+
+/**
+ * Opens an administration session the way the browser does and returns the
+ * cookie header that authenticates the rest of a test.
+ */
+export const createTestAdminSession = async (
+  app: FastifyInstance,
+  password?: string,
+): Promise<string> => {
+  const response = await app.inject({
+    method: 'POST',
+    url: API_ROUTES.adminSession,
+    headers: { [ADMIN_SESSION_CSRF_HEADER]: ADMIN_SESSION_CSRF_VALUE },
+    payload: password === undefined ? {} : { password },
+  });
+
+  if (response.statusCode !== 201) {
+    throw new Error(
+      `Administration session was refused with ${response.statusCode}: ${response.body}`,
+    );
+  }
+
+  const cookie = response.cookies.find(
+    ({ name }) => name === ADMIN_SESSION_COOKIE_NAME,
+  );
+
+  if (cookie === undefined) {
+    throw new Error('Administration session response carried no cookie');
+  }
+
+  return `${cookie.name}=${cookie.value}`;
+};
+
+/** Headers that authenticate a state-changing administration request. */
+export const adminMutationHeaders = (
+  sessionCookie: string,
+): Record<string, string> => ({
+  cookie: sessionCookie,
+  [ADMIN_SESSION_CSRF_HEADER]: ADMIN_SESSION_CSRF_VALUE,
+});
 
 /**
  * Every test runs against a fresh directory under the OS temporary directory so
@@ -35,7 +81,6 @@ export const createTestConfig = (
 ): ServerConfig => ({
   host: '127.0.0.1',
   port: 0,
-  administrationTokens: [TEST_API_TOKEN],
   ingestionTokens: [TEST_INGESTION_TOKEN],
   allowAdministrationUploads: false,
   adminSession: { max: 64, secure: false, ttlMs: 8 * 60 * 60 * 1_000 },

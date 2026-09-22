@@ -79,10 +79,13 @@ interface ClientMocks {
   readonly createAdminSession: ReturnType<typeof vi.fn>;
   readonly deleteAdminSession: ReturnType<typeof vi.fn>;
   readonly deleteMedia: ReturnType<typeof vi.fn>;
+  readonly getAdminAuthStatus: ReturnType<typeof vi.fn>;
   readonly getAdminSession: ReturnType<typeof vi.fn>;
   readonly getSettings: ReturnType<typeof vi.fn>;
   readonly listMedia: ReturnType<typeof vi.fn>;
   readonly listTelegramContributors: ReturnType<typeof vi.fn>;
+  readonly removeAdminPassword: ReturnType<typeof vi.fn>;
+  readonly setAdminPassword: ReturnType<typeof vi.fn>;
   readonly updateMedia: ReturnType<typeof vi.fn>;
   readonly updateSettings: ReturnType<typeof vi.fn>;
   readonly updateTelegramContributor: ReturnType<typeof vi.fn>;
@@ -101,6 +104,12 @@ const createClientMocks = (
     .mockResolvedValue({ expiresAt: '2026-08-02T12:00:00.000Z' });
   const getAdminSession = vi.fn().mockRejectedValue(unauthorized);
   const deleteAdminSession = vi.fn().mockResolvedValue(undefined);
+  // A fresh installation has no password, which is the documented default.
+  const getAdminAuthStatus = vi
+    .fn()
+    .mockResolvedValue({ passwordConfigured: false });
+  const setAdminPassword = vi.fn().mockResolvedValue(undefined);
+  const removeAdminPassword = vi.fn().mockResolvedValue(undefined);
   const listMedia = vi.fn().mockResolvedValue({ items, nextCursor: null });
   const getSettings = vi.fn().mockResolvedValue(settings);
   const uploadMedia = vi.fn().mockResolvedValue(firstMedia);
@@ -137,12 +146,15 @@ const createClientMocks = (
       createAdminSession,
       deleteAdminSession,
       deleteMedia,
+      getAdminAuthStatus,
       getAdminSession,
       getAdminMediaContentUrl: (id) =>
         `http://api.test/api/media/${id}/content`,
       getSettings,
       listMedia,
       listTelegramContributors,
+      removeAdminPassword,
+      setAdminPassword,
       updateMedia,
       updateSettings,
       updateTelegramContributor,
@@ -151,10 +163,13 @@ const createClientMocks = (
     createAdminSession,
     deleteAdminSession,
     deleteMedia,
+    getAdminAuthStatus,
     getAdminSession,
     getSettings,
     listMedia,
     listTelegramContributors,
+    removeAdminPassword,
+    setAdminPassword,
     updateMedia,
     updateSettings,
     updateTelegramContributor,
@@ -162,19 +177,21 @@ const createClientMocks = (
   };
 };
 
+const PASSWORDLESS_INTRO = /no administration password yet/;
+
+/** Opens the panel of an installation that has no password configured. */
 const openStudio = async (client: AdminClient): Promise<void> => {
   const user = userEvent.setup();
   const createClient = vi.fn().mockReturnValue(client);
   render(<AdminApp apiBaseUrl="http://api.test" createClient={createClient} />);
 
-  await user.type(
-    await screen.findByLabelText('Access token'),
-    'private-token',
-  );
+  // Waiting for the passwordless copy proves the sign-in screen has read the
+  // published state before the click, rather than the assumed default.
+  await screen.findByText(PASSWORDLESS_INTRO);
   await user.click(screen.getByRole('button', { name: 'Sign in' }));
   expect(await screen.findByRole('heading', { name: 'Library' })).toBeVisible();
   expect(createClient).toHaveBeenCalledWith();
-  expect(client.createAdminSession).toHaveBeenCalledWith('private-token');
+  expect(client.createAdminSession).toHaveBeenCalledWith(undefined);
 };
 
 const mediaCard = (filename: string): HTMLElement => {
@@ -195,12 +212,41 @@ afterEach(() => {
 });
 
 describe('AdminApp', () => {
-  it('rejects an invalid token without persisting it and focuses the error', async () => {
+  it('asks for the password only when one is configured', async () => {
     const user = userEvent.setup();
-    const unauthorized = new HomeGalleryApiError(401, 'Invalid bearer token', {
-      error: { code: 'unauthorized', message: 'Invalid bearer token' },
+    const mocks = createClientMocks([]);
+    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
+
+    render(
+      <AdminApp
+        apiBaseUrl="http://api.test"
+        createClient={() => mocks.client}
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText('Administration password'),
+      'the-house-password',
+    );
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() => {
+      expect(mocks.createAdminSession).toHaveBeenCalledWith(
+        'the-house-password',
+      );
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Library' }),
+    ).toBeVisible();
+  });
+
+  it('rejects an invalid password without persisting it and focuses the error', async () => {
+    const user = userEvent.setup();
+    const unauthorized = new HomeGalleryApiError(401, 'Wrong password', {
+      error: { code: 'unauthorized', message: 'Wrong password' },
     });
     const mocks = createClientMocks([]);
+    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
     mocks.createAdminSession.mockRejectedValue(unauthorized);
 
     render(
@@ -210,17 +256,148 @@ describe('AdminApp', () => {
       />,
     );
     await user.type(
-      await screen.findByLabelText('Access token'),
-      'wrong-token',
+      await screen.findByLabelText('Administration password'),
+      'wrong-password',
     );
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('access token was rejected');
+    expect(alert).toHaveTextContent('That password was rejected');
     expect(alert).toHaveFocus();
     expect(window.sessionStorage.length).toBe(0);
     expect(window.localStorage.length).toBe(0);
-    expect(window.location.href).not.toContain('wrong-token');
+    expect(window.location.href).not.toContain('wrong-password');
+  });
+
+  it('warns that a passwordless panel is open to the network', async () => {
+    const mocks = createClientMocks([]);
+    await openStudio(mocks.client);
+
+    expect(
+      screen.getByText(/anyone on this network can change the gallery/),
+    ).toBeVisible();
+    expect(screen.getByText('Open')).toBeVisible();
+    expect(screen.queryByLabelText('Current password')).toBeNull();
+  });
+
+  it('sets the first password from the security panel', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([]);
+    await openStudio(mocks.client);
+
+    await user.type(screen.getByLabelText(/New password/), 'a-new-password');
+    await user.type(
+      screen.getByLabelText('Repeat the new password'),
+      'a-new-password',
+    );
+    await user.click(screen.getByRole('button', { name: 'Set password' }));
+
+    await waitFor(() => {
+      expect(mocks.setAdminPassword).toHaveBeenCalledWith({
+        newPassword: 'a-new-password',
+      });
+    });
+    expect(
+      await screen.findByText(/administration password was saved/),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(/anyone on this network can change the gallery/),
+    ).toBeNull();
+    expect(screen.getByLabelText('Current password')).toBeVisible();
+  });
+
+  it('refuses to save two new passwords that do not match', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([]);
+    await openStudio(mocks.client);
+
+    await user.type(screen.getByLabelText(/New password/), 'a-new-password');
+    await user.type(
+      screen.getByLabelText('Repeat the new password'),
+      'a-different-password',
+    );
+    await user.click(screen.getByRole('button', { name: 'Set password' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The two new passwords do not match.',
+    );
+    expect(mocks.setAdminPassword).not.toHaveBeenCalled();
+  });
+
+  it('reports a wrong current password without ending the session', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([]);
+    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
+    mocks.getAdminSession.mockResolvedValue({
+      expiresAt: '2026-08-02T12:00:00.000Z',
+    });
+    mocks.setAdminPassword.mockRejectedValueOnce(
+      new HomeGalleryApiError(403, 'The current password is incorrect', {
+        error: {
+          code: 'forbidden',
+          message: 'The current password is incorrect',
+        },
+      }),
+    );
+
+    render(
+      <AdminApp
+        apiBaseUrl="http://api.test"
+        createClient={() => mocks.client}
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Library' });
+
+    await user.type(screen.getByLabelText('Current password'), 'not-the-one');
+    await user.type(screen.getByLabelText(/New password/), 'a-new-password');
+    await user.type(
+      screen.getByLabelText('Repeat the new password'),
+      'a-new-password',
+    );
+    await user.click(screen.getByRole('button', { name: 'Change password' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The current password is incorrect.',
+    );
+    expect(screen.getByRole('heading', { name: 'Library' })).toBeVisible();
+  });
+
+  it('removes the password and warns that the panel reopened', async () => {
+    const user = userEvent.setup();
+    const mocks = createClientMocks([]);
+    mocks.getAdminAuthStatus.mockResolvedValue({ passwordConfigured: true });
+    mocks.getAdminSession.mockResolvedValue({
+      expiresAt: '2026-08-02T12:00:00.000Z',
+    });
+
+    render(
+      <AdminApp
+        apiBaseUrl="http://api.test"
+        createClient={() => mocks.client}
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Library' });
+
+    await user.click(screen.getByRole('button', { name: 'Remove password' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Enter the current password to remove it.',
+    );
+    expect(mocks.removeAdminPassword).not.toHaveBeenCalled();
+
+    await user.type(
+      screen.getByLabelText('Current password'),
+      'the-house-password',
+    );
+    await user.click(screen.getByRole('button', { name: 'Remove password' }));
+
+    await waitFor(() => {
+      expect(mocks.removeAdminPassword).toHaveBeenCalledWith({
+        currentPassword: 'the-house-password',
+      });
+    });
+    expect(
+      await screen.findByText(/anyone on this network can change the gallery/),
+    ).toBeVisible();
   });
 
   it('restores an HttpOnly session and presents the empty library state', async () => {
@@ -252,7 +429,7 @@ describe('AdminApp', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
 
     expect(mocks.deleteAdminSession).toHaveBeenCalledOnce();
-    expect(await screen.findByLabelText('Access token')).toBeVisible();
+    expect(await screen.findByText(PASSWORDLESS_INTRO)).toBeVisible();
   });
 
   it('returns to sign-in when a server session expires during an action', async () => {
@@ -272,7 +449,7 @@ describe('AdminApp', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Your session expired',
     );
-    expect(screen.getByLabelText('Access token')).toBeVisible();
+    expect(screen.getByText(PASSWORDLESS_INTRO)).toBeVisible();
   });
 
   it('uploads a selected image through the shared client', async () => {

@@ -111,6 +111,21 @@ const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'create_admin_credentials',
+    apply: (database) => {
+      // The table is deliberately left empty: an installation without a row has
+      // no administration password, which is the documented default.
+      database.exec(`
+        CREATE TABLE admin_credentials (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          password_hash TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        ) STRICT;
+      `);
+    },
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

@@ -15,11 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import {
+  adminMutationHeaders,
   createTemporaryDataDirectory,
+  createTestAdminSession,
   createTestConfig,
   removeTemporaryDataDirectory,
   storeTestMedia,
-  TEST_API_TOKEN,
 } from './helpers.js';
 
 const UNKNOWN_ID = '3f0f2c6c-2b1a-4a4f-9f2c-8f5a1d1c0f9b';
@@ -27,10 +28,12 @@ const UNKNOWN_ID = '3f0f2c6c-2b1a-4a4f-9f2c-8f5a1d1c0f9b';
 describe('media management routes', () => {
   let dataDirectory: string;
   let app: FastifyInstance;
+  let sessionCookie: string;
 
   beforeEach(async () => {
     dataDirectory = await createTemporaryDataDirectory();
     app = await createApp(createTestConfig(dataDirectory));
+    sessionCookie = await createTestAdminSession(app);
   });
 
   afterEach(async () => {
@@ -38,19 +41,17 @@ describe('media management routes', () => {
     await removeTemporaryDataDirectory(dataDirectory);
   });
 
-  /** A `null` token sends no `Authorization` header at all. */
+  /** A `null` cookie sends no administration session at all. */
   const authenticated = (
     method: 'GET' | 'PATCH' | 'DELETE',
     url: string,
     payload?: Record<string, unknown>,
-    token: string | null = TEST_API_TOKEN,
+    cookie: string | null = sessionCookie,
   ): Promise<LightMyRequestResponse> => {
     const options: InjectOptions = {
       method,
       url,
-      ...(token === null
-        ? {}
-        : { headers: { authorization: `Bearer ${token}` } }),
+      ...(cookie === null ? {} : { headers: adminMutationHeaders(cookie) }),
       ...(payload === undefined ? {} : { payload }),
     };
 
@@ -138,7 +139,7 @@ describe('media management routes', () => {
       });
     });
 
-    it('requires a bearer token', async () => {
+    it('requires an administration session', async () => {
       await storeTestMedia(app);
 
       const response = await authenticated(
@@ -192,7 +193,7 @@ describe('media management routes', () => {
       expect(response.statusCode).toBe(404);
     });
 
-    it('requires a bearer token', async () => {
+    it('requires an administration session', async () => {
       const { record } = await storeTestMedia(app);
 
       const response = await authenticated(
@@ -293,7 +294,7 @@ describe('media management routes', () => {
       expect(response.statusCode).toBe(422);
     });
 
-    it('requires a bearer token', async () => {
+    it('requires an administration session', async () => {
       const { record } = await storeTestMedia(app);
 
       const response = await authenticated(
@@ -365,7 +366,7 @@ describe('media management routes', () => {
       expect(await readdir(app.mediaStorage.temporaryDirectory)).toEqual([]);
     });
 
-    it('requires a bearer token', async () => {
+    it('requires an administration session', async () => {
       const { record } = await storeTestMedia(app);
 
       const response = await authenticated(

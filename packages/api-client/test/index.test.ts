@@ -88,7 +88,7 @@ describe('createHomeGalleryClient', () => {
     expect(authorization).toBeNull();
   });
 
-  it('bootstraps a browser session without retaining the bearer in the client', async () => {
+  it('bootstraps a browser session by posting the password in the body', async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> =
       [];
     const fetchImplementation: typeof fetch = async (input, init) => {
@@ -101,23 +101,83 @@ describe('createHomeGalleryClient', () => {
       fetch: fetchImplementation,
     });
 
-    await client.createAdminSession('  one-time-admin-token  ');
+    await client.createAdminSession('the-house-password');
 
     const request = requests[0];
     expect(String(request?.input)).toBe(
       'https://gallery.example.test/api/admin/session',
     );
-    expect(String(request?.input)).not.toContain('one-time-admin-token');
+    expect(String(request?.input)).not.toContain('the-house-password');
     expect(request?.init).toMatchObject({
       method: 'POST',
       credentials: 'include',
+      body: JSON.stringify({ password: 'the-house-password' }),
     });
-    expect(new Headers(request?.init?.headers).get('authorization')).toBe(
-      'Bearer one-time-admin-token',
-    );
+    expect(new Headers(request?.init?.headers).get('authorization')).toBeNull();
     expect(
       new Headers(request?.init?.headers).get(ADMIN_SESSION_CSRF_HEADER),
-    ).toBeNull();
+    ).toBe(ADMIN_SESSION_CSRF_VALUE);
+  });
+
+  it('opens a session without a password when none is configured', async () => {
+    const requests: RequestInit[] = [];
+    const fetchImplementation: typeof fetch = async (input, init = {}) => {
+      requests.push(init);
+
+      return String(input).endsWith('/api/admin/auth')
+        ? jsonResponse({ passwordConfigured: false })
+        : jsonResponse({ expiresAt: '2026-08-02T12:00:00.000Z' }, 201);
+    };
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test',
+      useAdminSession: true,
+      fetch: fetchImplementation,
+    });
+
+    expect(await client.getAdminAuthStatus()).toEqual({
+      passwordConfigured: false,
+    });
+
+    await client.createAdminSession();
+
+    expect(requests[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  });
+
+  it('sends the CSRF header when changing and removing the password', async () => {
+    const requests: Array<{ input: RequestInfo | URL; init: RequestInit }> = [];
+    const fetchImplementation: typeof fetch = async (input, init = {}) => {
+      requests.push({ input, init });
+      return new Response(null, { status: 204 });
+    };
+    const client = createHomeGalleryClient({
+      baseUrl: 'https://gallery.example.test',
+      useAdminSession: true,
+      fetch: fetchImplementation,
+    });
+
+    await client.setAdminPassword({
+      currentPassword: 'the-old-password',
+      newPassword: 'the-new-password',
+    });
+    await client.removeAdminPassword({
+      currentPassword: 'the-new-password',
+    });
+
+    expect(requests.map(({ input }) => String(input))).toEqual([
+      'https://gallery.example.test/api/admin/password',
+      'https://gallery.example.test/api/admin/password',
+    ]);
+    expect(requests.map(({ init }) => init.method)).toEqual(['PUT', 'DELETE']);
+
+    for (const { init } of requests) {
+      expect(init.credentials).toBe('include');
+      expect(new Headers(init.headers).get(ADMIN_SESSION_CSRF_HEADER)).toBe(
+        ADMIN_SESSION_CSRF_VALUE,
+      );
+    }
   });
 
   it('uses included cookies and CSRF protection for session administration', async () => {

@@ -65,7 +65,6 @@ export const ALLOW_ALL_ORIGINS = '*';
 export interface ServerConfig {
   host: string;
   port: number;
-  administrationTokens: readonly string[];
   ingestionTokens: readonly string[];
   allowAdministrationUploads: boolean;
   adminSession: AdminSessionConfig;
@@ -222,8 +221,6 @@ const versionSchema = z.string().trim().min(1, 'Must not be empty').max(64);
 const serverEnvSchema = z.object({
   HOME_GALLERY_HOST: hostSchema.optional(),
   HOME_GALLERY_PORT: portSchema.optional(),
-  HOME_GALLERY_ADMIN_TOKEN: credentialTokenSchema,
-  HOME_GALLERY_ADMIN_TOKEN_PREVIOUS: credentialTokenSchema.optional(),
   HOME_GALLERY_INGESTION_TOKEN: credentialTokenSchema,
   HOME_GALLERY_INGESTION_TOKEN_PREVIOUS: credentialTokenSchema.optional(),
   HOME_GALLERY_ALLOW_ADMIN_UPLOADS: booleanVariable.optional(),
@@ -326,12 +323,6 @@ export const loadServerConfig = (
   return {
     host: values.HOME_GALLERY_HOST ?? DEFAULT_SERVER_HOST,
     port: values.HOME_GALLERY_PORT ?? DEFAULT_SERVER_PORT,
-    administrationTokens: [
-      values.HOME_GALLERY_ADMIN_TOKEN,
-      ...(values.HOME_GALLERY_ADMIN_TOKEN_PREVIOUS === undefined
-        ? []
-        : [values.HOME_GALLERY_ADMIN_TOKEN_PREVIOUS]),
-    ],
     ingestionTokens: [
       values.HOME_GALLERY_INGESTION_TOKEN,
       ...(values.HOME_GALLERY_INGESTION_TOKEN_PREVIOUS === undefined

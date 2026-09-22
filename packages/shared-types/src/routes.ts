@@ -2,6 +2,8 @@ export const ADMIN_SESSION_CSRF_HEADER = 'x-home-gallery-csrf';
 export const ADMIN_SESSION_CSRF_VALUE = '1';
 
 export const API_ROUTES = {
+  adminAuth: '/api/admin/auth',
+  adminPassword: '/api/admin/password',
   adminSession: '/api/admin/session',
   health: '/health',
   media: '/api/media',

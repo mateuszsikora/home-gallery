@@ -26,13 +26,13 @@ chmod 600 .env
 
 Replace every placeholder in `.env`:
 
-- generate independent `HOME_GALLERY_ADMIN_TOKEN` and `HOME_GALLERY_INGESTION_TOKEN` values with `openssl rand -hex 32`;
+- generate a `HOME_GALLERY_INGESTION_TOKEN` value with `openssl rand -hex 32`;
 - set the token returned by BotFather as `HOME_GALLERY_TELEGRAM_BOT_TOKEN`;
 - keep `HOME_GALLERY_TELEGRAM_MAX_DOWNLOAD_BYTES` at or below `HOME_GALLERY_MAX_UPLOAD_BYTES` so the bot rejects oversized responses before buffering them for upload;
 - keep the default host ports or choose unused alternatives;
 - use an absolute `HOME_GALLERY_BACKUP_DIR` on production hosts.
 
-Each application credential must be at least 32 characters with no whitespace. The administration token manages media and settings. The ingestion token can only upload media and is used by the Telegram bot. Keep `.env`, backups, databases, uploaded media, and Caddy certificate storage out of source control.
+The ingestion token must be at least 32 characters with no whitespace. It can only upload media and is used by the Telegram bot. Administration is not configured here: a new deployment starts with no administration password, and the administrator sets one from the administration application's Security panel after the first sign-in. Keep `.env`, backups, databases, uploaded media, and Caddy certificate storage out of source control.
 
 The GHCR packages are public, so the host needs no registry login. Deploy:
 
@@ -69,7 +69,7 @@ With the default ports, open:
 - `http://HOST:3011` for administration;
 - `http://HOST:3012/health` for the API health response.
 
-The administration application asks for `HOME_GALLERY_ADMIN_TOKEN` once and exchanges it for an opaque HttpOnly browser session; it does not store the bearer token. Browser uploads are rejected unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; leave the default in place when Telegram or another ingestion client is the only uploader. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `HOST`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless the supported TLS profile or another LAN reverse proxy terminates ports 80 or 443.
+A new deployment has no administration password, so the administration application opens for anyone who can reach it and says so until a password is set from its Security panel. Set one before exposing the deployment beyond a trusted network. The application then asks for that password once and exchanges it for an opaque HttpOnly browser session; it does not store the password. Browser uploads are rejected unless `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true`; leave the default in place when Telegram or another ingestion client is the only uploader. For a stable local name, add a router DNS entry such as `home-gallery.lan` pointing to `HOST`; mDNS or per-device hosts-file entries are also suitable. Include the selected ports in the URLs unless the supported TLS profile or another LAN reverse proxy terminates ports 80 or 443.
 
 When the host runs other Compose projects, verify their state and the occupied ports before and after first deployment:
 
@@ -116,18 +116,31 @@ If Caddy runs behind another CDN or load balancer, do not automatically trust th
 
 ## Credential scope, rotation, and throttling
 
-Administration and ingestion credentials are independently rotatable. To rotate either credential without a synchronized outage:
+The ingestion token is rotatable without a synchronized outage:
 
-1. copy its current value into the matching `*_TOKEN_PREVIOUS` variable;
+1. copy its current value into `HOME_GALLERY_INGESTION_TOKEN_PREVIOUS`;
 2. generate and install a new primary value;
 3. run `bash deploy.sh`;
-4. update the administration browser sessions or Telegram bot as appropriate and verify the new value;
-5. clear the `*_TOKEN_PREVIOUS` value and deploy again;
-6. verify that the retired value returns `401` in its original scope.
+4. update the Telegram bot and verify the new value;
+5. clear `HOME_GALLERY_INGESTION_TOKEN_PREVIOUS` and deploy again;
+6. verify that the retired value returns `401`.
 
-Never put an administration token in an ingestion variable merely to simplify rotation. `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` is the explicit compatibility control for browser uploads and should be enabled only when that feature is needed.
+The administration password is rotated from the administration application instead, and needs no deployment: changing it signs out every other browser immediately and keeps the one making the change signed in. `HOME_GALLERY_ALLOW_ADMIN_UPLOADS=true` is the explicit compatibility control for browser uploads and should be enabled only when that feature is needed; it lets an administration session reach the otherwise ingestion-only upload route, including while no password is set.
 
-Browser administration sessions live only in bounded server memory and contain no bearer credential. `HOME_GALLERY_ADMIN_SESSION_TTL_MS` defaults to eight hours and accepts one minute through seven days; `HOME_GALLERY_ADMIN_SESSION_MAX` defaults to 64 and caps concurrent sessions at 10,000. A server restart, explicit logout, expiry, or capacity eviction invalidates a session. The default LAN profile uses a non-`Secure` cookie because it runs over HTTP and is appropriate only on a trusted network. The supported TLS profile overrides `HOME_GALLERY_ADMIN_SESSION_SECURE=true`; do not disable it for HTTPS deployments.
+### Recovering a forgotten administration password
+
+The password lives in the gallery database, not in the deployment configuration, so recovery means clearing its row. The server image already carries the SQLite driver, so this needs no additional download. On the deployment host:
+
+```bash
+docker compose --project-name home-gallery --env-file .env run --rm --no-deps \
+  --entrypoint node server --input-type=commonjs \
+  -e "new (require('better-sqlite3'))(process.env.HOME_GALLERY_DATA_DIR + '/home-gallery.db').prepare('DELETE FROM admin_credentials').run()"
+docker compose --project-name home-gallery --env-file .env restart server
+```
+
+The gallery is unprotected from that moment until a new password is set, so run this only from the host itself and set a new password immediately afterwards. Take a backup first if the database state matters.
+
+Browser administration sessions live only in bounded server memory and contain no stored credential. `HOME_GALLERY_ADMIN_SESSION_TTL_MS` defaults to eight hours and accepts one minute through seven days; `HOME_GALLERY_ADMIN_SESSION_MAX` defaults to 64 and caps concurrent sessions at 10,000. A server restart, explicit logout, expiry, or capacity eviction invalidates a session. The default LAN profile uses a non-`Secure` cookie because it runs over HTTP and is appropriate only on a trusted network. The supported TLS profile overrides `HOME_GALLERY_ADMIN_SESSION_SECURE=true`; do not disable it for HTTPS deployments.
 
 Authentication failures default to 10 attempts per client address per 60 seconds. Authenticated uploads default to 30 attempts per client address per 60 seconds. Configure the two limits independently with `HOME_GALLERY_AUTH_RATE_LIMIT_*` and `HOME_GALLERY_UPLOAD_RATE_LIMIT_*`. A blocked request returns `429` and `Retry-After`; public gallery playback remains outside both limiters. The server logs the first limit event in a window with the proxy-aware client address and scope, then suppresses repeated limit events at the default log level so an attack cannot overwhelm useful logs.
 
@@ -156,13 +169,13 @@ Startup fails early when required secrets, Telegram IDs, ports, upload and downl
 
 ## Security boundaries
 
-- Treat the default HTTP endpoints as trusted-LAN services. Enable the supported TLS profile or use an authenticated private network before crossing an untrusted network; the one-time browser bearer exchange and non-browser bearer requests are otherwise sent in cleartext over HTTP.
+- Treat the default HTTP endpoints as trusted-LAN services. Enable the supported TLS profile or use an authenticated private network before crossing an untrusted network; the one-time browser password exchange and ingestion bearer requests are otherwise sent in cleartext over HTTP.
 - The empty CORS allowlist is the production default because gallery and administration traffic is same-origin through nginx. Use explicit same-site origins for split-origin development; explicit origins enable credentialed CORS for the administration cookie. `*` cannot support credentialed sessions and should not be used for an exposed deployment.
 - Browser administration uses a bounded, short-lived, opaque HttpOnly session cookie. SameSite strictness and the required custom header protect cookie-authenticated mutations against CSRF. The TLS profile marks the cookie `Secure`, and authorization and cookie headers are redacted from API logs.
-- The API rejects missing or invalid bearer tokens before reading upload bodies. It validates multipart counts and sizes, verifies image bytes, limits decoded pixels, applies EXIF orientation, and stores only normalized WebP files with server-generated names.
+- The administration password is stored only as a salted scrypt hash, is never logged, and is never returned by the API. A rejected password consumes the same bounded authentication limit as any other failed credential. The API rejects missing or invalid credentials before reading upload bodies. It validates multipart counts and sizes, verifies image bytes, limits decoded pixels, applies EXIF orientation, and stores only normalized WebP files with server-generated names.
 - Telegram authorization occurs before file lookup or download. Both declared and streamed download sizes are bounded, and secrets are redacted from bot and API error logs.
 - Containers run without added Linux capabilities, with read-only root filesystems and `no-new-privileges`. The web applications send a restrictive Content Security Policy and other defensive browser headers.
-- Keep `.env` at mode `600`, rotate the BotFather, administration, and ingestion credentials after suspected disclosure, and never paste them into issue, pull request, or diagnostic output.
+- Keep `.env` at mode `600`, rotate the BotFather and ingestion credentials and the administration password after suspected disclosure, and never paste them into issue, pull request, or diagnostic output.
 
 The complete authorization, input, dependency, recovery, and MVP review is recorded in [VALIDATION.md](VALIDATION.md).
 
@@ -226,7 +239,7 @@ After every restore test:
 
 The repository automates this sequence with `npm run test:compose`: it starts an isolated test project, uploads an image, restarts the stack, backs it up, deletes it, restores it, and verifies metadata and bytes. The test project and volume are removed on completion.
 
-The smoke test also verifies session creation, cookie-authenticated reads, CSRF enforcement, logout, restart invalidation, bearer compatibility, visibility through both web proxies, an unauthenticated rejection, and a clean server exit after `SIGTERM`. Set `HOME_GALLERY_SMOKE_REPORT_RESOURCES=1` to include an idle CPU and memory snapshot in its output.
+The smoke test also verifies passwordless session creation, setting an administration password, the refusal of a missing or wrong one, cookie-authenticated reads, CSRF enforcement, logout, restart invalidation, ingestion and administration scope separation, visibility through both web proxies, an unauthenticated rejection, and a clean server exit after `SIGTERM`. Set `HOME_GALLERY_SMOKE_REPORT_RESOURCES=1` to include an idle CPU and memory snapshot in its output.
 
 ## Upgrade and rollback
 

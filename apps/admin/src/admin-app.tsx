@@ -12,6 +12,7 @@ import {
   createHomeGalleryClient,
   type HomeGalleryClient,
 } from '@home-gallery/api-client';
+import { MIN_ADMIN_PASSWORD_LENGTH } from '@home-gallery/shared-types';
 
 import {
   AlertIcon,
@@ -40,11 +41,14 @@ export type AdminClient = Pick<
   | 'createAdminSession'
   | 'deleteAdminSession'
   | 'deleteMedia'
+  | 'getAdminAuthStatus'
   | 'getAdminMediaContentUrl'
   | 'getAdminSession'
   | 'getSettings'
   | 'listMedia'
   | 'listTelegramContributors'
+  | 'removeAdminPassword'
+  | 'setAdminPassword'
   | 'updateMedia'
   | 'updateSettings'
   | 'updateTelegramContributor'
@@ -62,6 +66,18 @@ interface SettingsDraft {
   readonly playbackMode: PlaybackMode;
   readonly slideDurationSeconds: string;
 }
+
+interface SecurityDraft {
+  readonly confirmPassword: string;
+  readonly currentPassword: string;
+  readonly newPassword: string;
+}
+
+const EMPTY_SECURITY_DRAFT: SecurityDraft = {
+  confirmPassword: '',
+  currentPassword: '',
+  newPassword: '',
+};
 
 type Phase = 'loading' | 'ready' | 'signed-out';
 
@@ -165,20 +181,23 @@ const contributorName = (contributor: TelegramContributor): string => {
 interface StudioData {
   readonly contributors: TelegramContributor[];
   readonly media: MediaRecord[];
+  readonly passwordConfigured: boolean;
   readonly settings: GallerySettings;
 }
 
 /** Everything the studio needs, fetched together so it opens in one state. */
 const loadStudio = async (client: AdminClient): Promise<StudioData> => {
-  const [media, settings, contributors] = await Promise.all([
+  const [media, settings, contributors, auth] = await Promise.all([
     listAllMedia(client),
     client.getSettings(),
     client.listTelegramContributors(),
+    client.getAdminAuthStatus(),
   ]);
 
   return {
     contributors: sortContributors(contributors.items),
     media,
+    passwordConfigured: auth.passwordConfigured,
     settings,
   };
 };
@@ -194,6 +213,13 @@ const errorDetail = (error: unknown): string => {
 
 const isUnauthorized = (error: unknown): boolean =>
   error instanceof HomeGalleryApiError && error.status === 401;
+
+/**
+ * The server answers a rejected current password with 403 so it cannot be
+ * mistaken for the expired session that 401 always means here.
+ */
+const isRejectedPassword = (error: unknown): boolean =>
+  error instanceof HomeGalleryApiError && error.status === 403;
 
 const formatTimestamp = (timestamp: string): string =>
   new Intl.DateTimeFormat('en', {
@@ -271,7 +297,12 @@ export const AdminApp = ({
   apiBaseUrl,
   createClient,
 }: AdminAppProps): ReactElement => {
-  const [tokenInput, setTokenInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  // Assumed until the server answers, so a failed status request never renders
+  // the studio as open when it is in fact protected.
+  const [passwordConfigured, setPasswordConfigured] = useState(true);
+  const [securityDraft, setSecurityDraft] =
+    useState<SecurityDraft>(EMPTY_SECURITY_DRAFT);
   const [phase, setPhase] = useState<Phase>('loading');
   const [media, setMedia] = useState<MediaRecord[]>([]);
   const [contributors, setContributors] = useState<TelegramContributor[]>([]);
@@ -300,6 +331,16 @@ export const AdminApp = ({
   );
   const client = useMemo(() => clientFactory(), [clientFactory]);
 
+  const openStudio = (studio: StudioData): void => {
+    setMedia(studio.media);
+    setContributors(studio.contributors);
+    setSettingsDraft(toSettingsDraft(studio.settings));
+    setPasswordConfigured(studio.passwordConfigured);
+    setSecurityDraft(EMPTY_SECURITY_DRAFT);
+    setPasswordInput('');
+    setPhase('ready');
+  };
+
   useEffect(() => {
     let cancelled = false;
     setPhase('loading');
@@ -313,13 +354,9 @@ export const AdminApp = ({
           return;
         }
 
-        setMedia(studio.media);
-        setContributors(studio.contributors);
-        setSettingsDraft(toSettingsDraft(studio.settings));
-        setPhase('ready');
-        setTokenInput('');
+        openStudio(studio);
       })
-      .catch((reason: unknown) => {
+      .catch(async (reason: unknown) => {
         if (cancelled) {
           return;
         }
@@ -329,6 +366,14 @@ export const AdminApp = ({
           setError(
             `The administration session could not be restored. ${errorDetail(reason)}`,
           );
+        }
+
+        // Without this the sign-in screen cannot tell an unprotected gallery
+        // from one that is waiting for a password.
+        const auth = await client.getAdminAuthStatus().catch(() => undefined);
+
+        if (!cancelled && auth !== undefined) {
+          setPasswordConfigured(auth.passwordConfigured);
         }
       });
 
@@ -355,7 +400,8 @@ export const AdminApp = ({
   };
 
   const signOut = (message?: string): void => {
-    setTokenInput('');
+    setPasswordInput('');
+    setSecurityDraft(EMPTY_SECURITY_DRAFT);
     setMedia([]);
     setContributors([]);
     setSettingsDraft(undefined);
@@ -369,7 +415,7 @@ export const AdminApp = ({
 
   const handleActionFailure = (reason: unknown, context: string): void => {
     if (isUnauthorized(reason)) {
-      signOut('Your session expired. Enter the access token to continue.');
+      signOut('Your session expired. Open the studio again to continue.');
       return;
     }
 
@@ -381,30 +427,113 @@ export const AdminApp = ({
   ): Promise<void> => {
     event.preventDefault();
     clearMessages();
-    const trimmedToken = tokenInput.trim();
 
-    if (trimmedToken === '') {
-      setError('Enter an access token to continue.');
+    if (passwordConfigured && passwordInput === '') {
+      setError('Enter the administration password to continue.');
       return;
     }
 
-    setTokenInput('');
+    const password = passwordConfigured ? passwordInput : undefined;
+    setPasswordInput('');
     setPhase('loading');
 
     try {
-      await client.createAdminSession(trimmedToken);
-      const studio = await loadStudio(client);
-      setMedia(studio.media);
-      setContributors(studio.contributors);
-      setSettingsDraft(toSettingsDraft(studio.settings));
-      setPhase('ready');
+      await client.createAdminSession(password);
+      openStudio(await loadStudio(client));
     } catch (reason) {
       setPhase('signed-out');
+
+      if (isUnauthorized(reason)) {
+        setError('That password was rejected. Check it and try again.');
+        setPasswordConfigured(true);
+        return;
+      }
+
       setError(
-        isUnauthorized(reason)
-          ? 'That access token was rejected. Check the token and try again.'
-          : `The administration data could not be loaded. ${errorDetail(reason)}`,
+        `The administration data could not be loaded. ${errorDetail(reason)}`,
       );
+    }
+  };
+
+  const savePassword = async (
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> => {
+    event.preventDefault();
+
+    if (busyAction !== undefined) {
+      return;
+    }
+
+    clearMessages();
+
+    if (securityDraft.newPassword !== securityDraft.confirmPassword) {
+      setError('The two new passwords do not match.');
+      return;
+    }
+
+    if (securityDraft.newPassword.length < MIN_ADMIN_PASSWORD_LENGTH) {
+      setError(
+        `A password needs at least ${MIN_ADMIN_PASSWORD_LENGTH} characters.`,
+      );
+      return;
+    }
+
+    setBusyAction('password');
+
+    try {
+      await client.setAdminPassword({
+        newPassword: securityDraft.newPassword,
+        ...(passwordConfigured
+          ? { currentPassword: securityDraft.currentPassword }
+          : {}),
+      });
+      setPasswordConfigured(true);
+      setSecurityDraft(EMPTY_SECURITY_DRAFT);
+      setNotice(
+        'The administration password was saved. Other signed-in browsers were locked out.',
+      );
+    } catch (reason) {
+      if (isRejectedPassword(reason)) {
+        setError('The current password is incorrect.');
+      } else {
+        handleActionFailure(reason, 'The password could not be saved.');
+      }
+    } finally {
+      setBusyAction(undefined);
+    }
+  };
+
+  const removePassword = async (): Promise<void> => {
+    if (busyAction !== undefined) {
+      return;
+    }
+
+    clearMessages();
+
+    if (securityDraft.currentPassword === '') {
+      setError('Enter the current password to remove it.');
+      return;
+    }
+
+    setBusyAction('password');
+
+    try {
+      await client.removeAdminPassword({
+        currentPassword: securityDraft.currentPassword,
+      });
+      setPasswordConfigured(false);
+      setSecurityDraft(EMPTY_SECURITY_DRAFT);
+      setNotice(
+        'The administration password was removed. Anyone on this network can now open the studio.',
+      );
+    } catch (reason) {
+      if (isRejectedPassword(reason)) {
+        setError('The current password is incorrect.');
+      } else {
+        handleActionFailure(reason, 'The password could not be removed.');
+      }
+    } finally {
+      setBusyAction(undefined);
     }
   };
 
@@ -671,32 +800,38 @@ export const AdminApp = ({
           </span>
           <h1 id="login-title">Home Gallery admin</h1>
           <p className="auth__intro">
-            Enter the administration access token to start a short-lived
-            session.
+            {passwordConfigured
+              ? 'Enter the administration password to start a short-lived session.'
+              : 'This gallery has no administration password yet, so the panel opens for anyone who can reach it. Set one from the Security panel once you are in.'}
           </p>
           <StatusMessage error={error} errorRef={errorRef} notice={notice} />
           <form
             className="auth__form field"
             onSubmit={(event) => void authenticate(event)}
           >
-            <label className="field__label" htmlFor="access-token">
-              Access token
-            </label>
-            <input
-              autoComplete="off"
-              autoFocus
-              className="text-input"
-              id="access-token"
-              name="accessToken"
-              onChange={(event) => {
-                setTokenInput(event.currentTarget.value);
-              }}
-              placeholder="Paste your token"
-              required
-              type="password"
-              value={tokenInput}
-            />
+            {passwordConfigured ? (
+              <>
+                <label className="field__label" htmlFor="admin-password">
+                  Administration password
+                </label>
+                <input
+                  autoComplete="current-password"
+                  autoFocus
+                  className="text-input"
+                  id="admin-password"
+                  name="adminPassword"
+                  onChange={(event) => {
+                    setPasswordInput(event.currentTarget.value);
+                  }}
+                  placeholder="Your password"
+                  required
+                  type="password"
+                  value={passwordInput}
+                />
+              </>
+            ) : null}
             <button
+              autoFocus={!passwordConfigured}
               className="button button--primary button--block"
               type="submit"
             >
@@ -705,8 +840,9 @@ export const AdminApp = ({
           </form>
           <p className="auth__note">
             <ShieldIcon />
-            The browser never stores the token. The server exchanges it for an
-            HttpOnly session cookie that page scripts cannot read.
+            {passwordConfigured
+              ? 'The browser never stores the password. The server exchanges it for an HttpOnly session cookie that page scripts cannot read.'
+              : 'Until a password is set, treat this gallery as open to everyone on your local network.'}
           </p>
         </section>
       </main>
@@ -759,6 +895,16 @@ export const AdminApp = ({
 
       <main className="page">
         <StatusMessage error={error} errorRef={errorRef} notice={notice} />
+
+        {passwordConfigured ? null : (
+          <div className="banner banner--warning" role="status">
+            <AlertIcon />
+            <p>
+              No administration password is set, so anyone on this network can
+              change the gallery. <a href="#security">Set one now</a>.
+            </p>
+          </div>
+        )}
 
         <div className="layout">
           <div className="layout__main">
@@ -1087,6 +1233,139 @@ export const AdminApp = ({
                     })}
                   </ul>
                 )}
+              </div>
+            </section>
+
+            <section
+              aria-labelledby="security-title"
+              className="panel"
+              id="security"
+            >
+              <div className="panel__header">
+                <div>
+                  <h2 id="security-title">Security</h2>
+                  <p className="panel__hint">
+                    {passwordConfigured
+                      ? 'Saving a new password signs out every other browser and keeps this one open.'
+                      : `A password of at least ${MIN_ADMIN_PASSWORD_LENGTH} characters closes the panel to everyone else on this network.`}
+                  </p>
+                </div>
+                <span
+                  className={`badge${passwordConfigured ? '' : ' badge--attention'}`}
+                >
+                  {passwordConfigured ? 'Protected' : 'Open'}
+                </span>
+              </div>
+
+              <div className="panel__body">
+                <form
+                  className="security"
+                  onSubmit={(event) => void savePassword(event)}
+                >
+                  {passwordConfigured ? (
+                    <div className="field">
+                      <label
+                        className="field__label"
+                        htmlFor="current-password"
+                      >
+                        Current password
+                      </label>
+                      <input
+                        autoComplete="current-password"
+                        className="text-input"
+                        id="current-password"
+                        name="currentPassword"
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setSecurityDraft((draft) => ({
+                            ...draft,
+                            currentPassword: value,
+                          }));
+                        }}
+                        required
+                        type="password"
+                        value={securityDraft.currentPassword}
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className="field">
+                    <label className="field__label" htmlFor="new-password">
+                      <span>New password</span>
+                      <small>
+                        At least {MIN_ADMIN_PASSWORD_LENGTH} characters
+                      </small>
+                    </label>
+                    <input
+                      autoComplete="new-password"
+                      className="text-input"
+                      id="new-password"
+                      minLength={MIN_ADMIN_PASSWORD_LENGTH}
+                      name="newPassword"
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setSecurityDraft((draft) => ({
+                          ...draft,
+                          newPassword: value,
+                        }));
+                      }}
+                      required
+                      type="password"
+                      value={securityDraft.newPassword}
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label className="field__label" htmlFor="confirm-password">
+                      Repeat the new password
+                    </label>
+                    <input
+                      autoComplete="new-password"
+                      className="text-input"
+                      id="confirm-password"
+                      name="confirmPassword"
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setSecurityDraft((draft) => ({
+                          ...draft,
+                          confirmPassword: value,
+                        }));
+                      }}
+                      required
+                      type="password"
+                      value={securityDraft.confirmPassword}
+                    />
+                  </div>
+
+                  <button
+                    className="button button--primary button--block"
+                    disabled={actionInProgress}
+                    type="submit"
+                  >
+                    {busyAction === 'password'
+                      ? 'Saving…'
+                      : passwordConfigured
+                        ? 'Change password'
+                        : 'Set password'}
+                  </button>
+                </form>
+
+                {passwordConfigured ? (
+                  <div className="security__removal">
+                    <p>
+                      Removing the password reopens the panel to everyone on
+                      this network. It needs the current password above.
+                    </p>
+                    <button
+                      className="button button--danger"
+                      disabled={actionInProgress}
+                      onClick={() => void removePassword()}
+                      type="button"
+                    >
+                      Remove password
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </section>
           </div>

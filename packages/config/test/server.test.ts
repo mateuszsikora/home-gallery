@@ -19,11 +19,9 @@ import {
   type ServerEnvironment,
 } from '../src/server.js';
 
-const VALID_TOKEN = 'a'.repeat(MIN_API_TOKEN_LENGTH);
 const INGESTION_TOKEN = 'b'.repeat(MIN_API_TOKEN_LENGTH);
 
 const environment = (overrides: ServerEnvironment = {}): ServerEnvironment => ({
-  HOME_GALLERY_ADMIN_TOKEN: VALID_TOKEN,
   HOME_GALLERY_INGESTION_TOKEN: INGESTION_TOKEN,
   HOME_GALLERY_DATA_DIR: '/srv/home-gallery/data',
   ...overrides,
@@ -48,7 +46,6 @@ describe('loadServerConfig', () => {
     expect(loadServerConfig(environment())).toEqual({
       host: DEFAULT_SERVER_HOST,
       port: DEFAULT_SERVER_PORT,
-      administrationTokens: [VALID_TOKEN],
       ingestionTokens: [INGESTION_TOKEN],
       allowAdministrationUploads: false,
       adminSession: {
@@ -80,7 +77,6 @@ describe('loadServerConfig', () => {
         environment({
           HOME_GALLERY_HOST: '127.0.0.1',
           HOME_GALLERY_PORT: '3012',
-          HOME_GALLERY_ADMIN_TOKEN_PREVIOUS: 'c'.repeat(32),
           HOME_GALLERY_INGESTION_TOKEN_PREVIOUS: 'd'.repeat(32),
           HOME_GALLERY_ALLOW_ADMIN_UPLOADS: 'true',
           HOME_GALLERY_ADMIN_SESSION_TTL_MS: '3600000',
@@ -102,7 +98,6 @@ describe('loadServerConfig', () => {
     ).toMatchObject({
       host: '127.0.0.1',
       port: 3012,
-      administrationTokens: [VALID_TOKEN, 'c'.repeat(32)],
       ingestionTokens: [INGESTION_TOKEN, 'd'.repeat(32)],
       allowAdministrationUploads: true,
       adminSession: { max: 12, secure: true, ttlMs: 3_600_000 },
@@ -126,7 +121,6 @@ describe('loadServerConfig', () => {
 
   it('reports every missing security-critical variable at once', () => {
     expect(issueVariables(() => loadServerConfig({}))).toEqual([
-      'HOME_GALLERY_ADMIN_TOKEN',
       'HOME_GALLERY_INGESTION_TOKEN',
       'HOME_GALLERY_DATA_DIR',
     ]);
@@ -145,16 +139,16 @@ describe('loadServerConfig', () => {
 
     expect(error).toBeInstanceOf(ConfigurationError);
     expect((error as ConfigurationError).message).toContain(
-      'HOME_GALLERY_ADMIN_TOKEN: Is required',
+      'HOME_GALLERY_INGESTION_TOKEN: Is required',
     );
   });
 
   it('treats a blank variable as missing', () => {
     expect(
       issueVariables(() =>
-        loadServerConfig(environment({ HOME_GALLERY_ADMIN_TOKEN: '   ' })),
+        loadServerConfig(environment({ HOME_GALLERY_INGESTION_TOKEN: '   ' })),
       ),
-    ).toEqual(['HOME_GALLERY_ADMIN_TOKEN']);
+    ).toEqual(['HOME_GALLERY_INGESTION_TOKEN']);
   });
 
   it('falls back to the default when an optional variable is blank', () => {
@@ -167,18 +161,18 @@ describe('loadServerConfig', () => {
     expect(
       issueVariables(() =>
         loadServerConfig(
-          environment({ HOME_GALLERY_ADMIN_TOKEN: 'too-short' }),
+          environment({ HOME_GALLERY_INGESTION_TOKEN: 'too-short' }),
         ),
       ),
-    ).toEqual(['HOME_GALLERY_ADMIN_TOKEN']);
+    ).toEqual(['HOME_GALLERY_INGESTION_TOKEN']);
   });
 
   it('trims a token that arrives with a trailing newline', () => {
     expect(
       loadServerConfig(
-        environment({ HOME_GALLERY_ADMIN_TOKEN: `${VALID_TOKEN}\n` }),
-      ).administrationTokens,
-    ).toEqual([VALID_TOKEN]);
+        environment({ HOME_GALLERY_INGESTION_TOKEN: `${INGESTION_TOKEN}\n` }),
+      ).ingestionTokens,
+    ).toEqual([INGESTION_TOKEN]);
   });
 
   it.each([

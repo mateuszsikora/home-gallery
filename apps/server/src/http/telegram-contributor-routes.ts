@@ -50,7 +50,7 @@ const requireContributor = (
 export const registerTelegramContributorRoutes = (
   app: FastifyInstance,
 ): void => {
-  const administrationRoute = { onRequest: app.requireAdministrationToken };
+  const administrationRoute = { onRequest: app.requireAdministrationSession };
 
   app.post(
     API_ROUTES.telegramContributors,

@@ -484,6 +484,21 @@ button:disabled {
   color: var(--ink-muted);
 }
 
+.banner--warning {
+  border-color: #ddc79a;
+  color: #6a4a12;
+  background: #f7eeda;
+}
+
+.banner--warning svg {
+  color: #b5801f;
+}
+
+.banner--warning a {
+  color: inherit;
+  font-weight: 550;
+}
+
 /* ----------------------------------------------------------------- fields */
 
 .field {
@@ -968,6 +983,28 @@ button:disabled {
   display: grid;
   gap: var(--sp-4);
   padding: 0 var(--sp-4) var(--sp-4);
+}
+
+.security {
+  display: grid;
+  gap: var(--sp-4);
+  max-width: 24rem;
+}
+
+.security__removal {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.security__removal p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--ink-subtle);
+  font-size: var(--fs-sm);
 }
 
 /* ------------------------------------------------------------ responsive */
