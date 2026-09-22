@@ -38,7 +38,7 @@ export const registerAdminPasswordRoutes = (
         request,
         reply,
         'The current administration password is incorrect',
-        'forbidden',
+        'invalid_password',
       );
     }
   };

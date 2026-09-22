@@ -137,7 +137,8 @@ const parseUpload = async (
  * The bot already refuses to download for anybody else, but the ingestion
  * credential is shared with the bot, so the server must make the authorization
  * decision itself. An unknown, unidentified, pending, and rejected contributor
- * are answered identically so the caller learns nothing about the review queue.
+ * are answered identically, code included, so the caller learns nothing about
+ * the review queue beyond the fact that this sender may not submit.
  */
 const requireApprovedContributor = (
   app: FastifyInstance,
@@ -154,7 +155,7 @@ const requireApprovedContributor = (
 
   if (contributor?.status !== 'approved') {
     throw new ApiError(
-      'forbidden',
+      'contributor_not_approved',
       'This Telegram contributor is not approved to submit media',
     );
   }

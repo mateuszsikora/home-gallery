@@ -110,11 +110,16 @@ describe('administration password routes', () => {
       newPassword: NEXT_PASSWORD,
     });
 
+    // The code names the rejected password, so the administration app does not
+    // have to infer that cause from a 403 the route's other guards also use.
     expect(missing.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(missing.json()).error.code).toBe(
-      'forbidden',
+      'invalid_password',
     );
     expect(wrong.statusCode).toBe(403);
+    expect(apiErrorBodySchema.parse(wrong.json()).error.code).toBe(
+      'invalid_password',
+    );
     expect(wrong.body).not.toContain(TEST_ADMIN_PASSWORD);
     expect(correct.statusCode).toBe(204);
   });
@@ -125,6 +130,9 @@ describe('administration password routes', () => {
     const wrong = await removePassword({ currentPassword: NEXT_PASSWORD });
 
     expect(wrong.statusCode).toBe(403);
+    expect(apiErrorBodySchema.parse(wrong.json()).error.code).toBe(
+      'invalid_password',
+    );
     expect(await passwordConfigured()).toBe(true);
 
     const removed = await removePassword({
@@ -198,7 +206,13 @@ describe('administration password routes', () => {
       payload: { newPassword: TEST_ADMIN_PASSWORD },
     });
 
+    // The same 403 as a rejected password, with a different code: a client that
+    // told the two apart by status would blame the administrator's typing for a
+    // header its own request failed to send.
     expect(response.statusCode).toBe(403);
+    expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
+      'csrf_required',
+    );
     expect(await passwordConfigured()).toBe(false);
   });
 

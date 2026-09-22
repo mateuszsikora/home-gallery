@@ -46,7 +46,7 @@ export const registerAdminSessionRoutes = (
     // an unrelated page cannot open a session against a passwordless gallery.
     if (!hasValidCsrfHeader(request)) {
       throw new ApiError(
-        'forbidden',
+        'csrf_required',
         `Session creation requires ${ADMIN_SESSION_CSRF_HEADER}`,
       );
     }
@@ -86,7 +86,7 @@ export const registerAdminSessionRoutes = (
   app.delete(API_ROUTES.adminSession, async (request, reply) => {
     if (!hasValidCsrfHeader(request)) {
       throw new ApiError(
-        'forbidden',
+        'csrf_required',
         `Session logout requires ${ADMIN_SESSION_CSRF_HEADER}`,
       );
     }

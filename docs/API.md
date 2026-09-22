@@ -4,8 +4,8 @@ The shared runtime schemas and TypeScript types live in `@home-gallery/shared-ty
 
 ## Conventions
 
-- Administration routes require the browser session cookie created by the session endpoint. Ingestion routes require `Authorization: Bearer <token>`; the ingestion token is never accepted in a URL. The two scopes are independent, and neither credential is accepted on the other's routes. A valid administration session offered on an ingestion route is refused with `403` and error code `forbidden`, so it is never confused with the `401` that means the session expired.
-- Cookie-authenticated `POST`, `PATCH`, and `DELETE` requests require `X-Home-Gallery-CSRF: 1`. Ingestion bearer clients do not need this header.
+- Administration routes require the browser session cookie created by the session endpoint. Ingestion routes require `Authorization: Bearer <token>`; the ingestion token is never accepted in a URL. The two scopes are independent, and neither credential is accepted on the other's routes. A valid administration session offered on an ingestion route is refused with `403` and error code `administration_ingestion_disabled`, so it is never confused with the `401` that means the session expired.
+- Cookie-authenticated `POST`, `PATCH`, and `DELETE` requests require `X-Home-Gallery-CSRF: 1`; a request without it is refused with `403` and error code `csrf_required`. Ingestion bearer clients do not need this header.
 - JSON requests use `Content-Type: application/json` and JSON responses use `Content-Type: application/json`.
 - Timestamps are ISO 8601 UTC strings.
 - Media IDs are UUIDs. Pagination cursors are opaque and clients must return them unchanged.
@@ -31,7 +31,7 @@ Every non-successful response uses this shape:
 }
 ```
 
-`issues` is optional. Consumers should branch on `error.code`; `message` is intended for people and may change.
+`issues` is optional. Consumers should branch on `error.code`; `message` is intended for people and may change. A status may carry more than one code. Every `403` this API raises names its cause — `invalid_password`, `administration_ingestion_disabled`, `csrf_required`, or `contributor_not_approved` — and a bare `forbidden` is left for a refusal the contract does not name. A consumer that acts on a specific cause must match its code, because the status alone does not identify one, and must treat an unrecognized code as a refusal it cannot explain. Codes are added over time, and `@home-gallery/api-client` validates the body against the code list it was built with, so a client older than the server discards the whole error body — message included — rather than reporting an unknown code. Ship the client and the server together.
 
 ## Routes
 
@@ -82,7 +82,7 @@ A fresh installation has no administration password, and anyone who can reach th
 
 `currentPassword` is required exactly when a password is already configured. `DELETE /api/admin/password` takes the same session, the same CSRF header, and a body with only `currentPassword`; it returns the installation to the unprotected default, and answers `409` with error code `conflict` when there is no password to remove. Both routes return `204 No Content` on success, invalidate every other administration session, and keep the calling session valid.
 
-A password is 8 to 128 characters and may not contain control characters. A wrong `currentPassword` is answered with `403` and error code `forbidden`, which distinguishes it from the `401` that an expired session produces. Passwords are stored only as salted scrypt hashes, are never logged, and are never returned by the API.
+A password is 8 to 128 characters and may not contain control characters. A wrong `currentPassword` is answered with `403` and error code `invalid_password`, which distinguishes it from the `401` that an expired session produces and from every other refusal that shares the `403`. That code belongs to these two routes: sign-in reports a rejected password as `401 unauthorized`, because no session exists there to keep valid. Passwords are stored only as salted scrypt hashes, are never logged, and are never returned by the API.
 
 ### Browser administration session
 
@@ -122,7 +122,7 @@ The healthy response uses HTTP `200`. If the database readiness probe fails, the
 
 `POST /api/media` uses `multipart/form-data` with these fields:
 
-The ingestion credential is required. An administration session is accepted only when the operator explicitly enables administration uploads; otherwise a valid session is answered `403` with error code `forbidden`, never the `401` that means an expired session.
+The ingestion credential is required. An administration session is accepted only when the operator explicitly enables administration uploads; otherwise a valid session is answered `403` with error code `administration_ingestion_disabled`, never the `401` that means an expired session. That code names the deployment setting as the cause, so a client can tell it apart from the other refusals this route answers with `403`. The same code answers every ingestion route, so it says that this session may not ingest, not that this particular route is closed.
 
 | Field              | Required | Description                                                           |
 | ------------------ | -------- | --------------------------------------------------------------------- |
@@ -259,7 +259,7 @@ Only `telegramUserId` is required, and the caller cannot propose a status. The r
 
 `pending` is rejected as a decision, and an unknown or malformed identifier is reported as `not_found`.
 
-`POST /api/media` with `source` set to `telegram` requires `sourceId` to name an approved contributor. Unidentified, unknown, pending, and rejected senders all receive `forbidden` so the caller learns nothing about the review queue.
+`POST /api/media` with `source` set to `telegram` requires `sourceId` to name an approved contributor. Unidentified, unknown, pending, and rejected senders all receive the same `403` and error code `contributor_not_approved`, so the caller learns nothing about the review queue beyond the fact that this sender may not submit.
 
 ### Settings
 

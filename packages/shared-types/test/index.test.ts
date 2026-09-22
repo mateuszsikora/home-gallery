@@ -129,6 +129,24 @@ describe('error contracts', () => {
     expect(apiErrorBodySchema.parse(body)).toEqual(body);
     expect(API_ERROR_STATUS[body.error.code]).toBe(422);
   });
+
+  it('gives each named refusal its own code under one shared status', () => {
+    // A client that acts on a cause has to read the code, because the status
+    // these share does not say which of them answered.
+    for (const code of [
+      'forbidden',
+      'invalid_password',
+      'administration_ingestion_disabled',
+      'csrf_required',
+      'contributor_not_approved',
+    ] as const) {
+      expect(API_ERROR_STATUS[code]).toBe(403);
+      expect(
+        apiErrorBodySchema.safeParse(createApiErrorBody(code, 'Refused'))
+          .success,
+      ).toBe(true);
+    }
+  });
 });
 
 describe('administration session contract', () => {

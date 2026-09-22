@@ -20,6 +20,13 @@ const BEARER_SCHEME = 'bearer';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
+ * How a failed credential check is named to the client, on either scope.
+ * `invalid_password` is reserved for a route that already holds a valid session
+ * and is only rejecting the password it was given.
+ */
+type CredentialRejectionCode = 'invalid_password' | 'unauthorized';
+
+/**
  * Compares two secrets without leaking their contents through timing. Hashing
  * first gives both operands a fixed length, so the comparison also cannot leak
  * the expected token length.
@@ -77,14 +84,15 @@ declare module 'fastify' {
      * Counts a failed credential check for the requesting address and rejects
      * the request. Routes that validate a password themselves reuse it so every
      * administration failure shares one limit. A route that already has a valid
-     * session passes `forbidden`, which keeps a mistyped current password from
-     * looking like an expired session to the administration app.
+     * session passes `invalid_password`, which names the rejected password as
+     * the cause instead of leaving the administration app to guess one from the
+     * status, and keeps it from looking like an expired session.
      */
     rejectAdministrationAttempt: (
       request: FastifyRequest,
       reply: Parameters<onRequestHookHandler>[1],
       message?: string,
-      code?: 'forbidden' | 'unauthorized',
+      code?: CredentialRejectionCode,
     ) => never;
     requireAdministrationSession: onRequestHookHandler;
     requireIngestionToken: onRequestHookHandler;
@@ -136,7 +144,7 @@ export const registerAuthentication = (
     reply: Parameters<onRequestHookHandler>[1],
     scope: 'administration' | 'ingestion',
     message: string,
-    code: 'forbidden' | 'unauthorized' = 'unauthorized',
+    code: CredentialRejectionCode = 'unauthorized',
   ): never => {
     enforceLimit(
       request,
@@ -158,7 +166,7 @@ export const registerAuthentication = (
 
     if (!SAFE_METHODS.has(request.method) && !hasValidCsrfHeader(request)) {
       throw new ApiError(
-        'forbidden',
+        'csrf_required',
         `Cookie-authenticated mutations require ${ADMIN_SESSION_CSRF_HEADER}`,
       );
     }
@@ -193,7 +201,7 @@ export const registerAuthentication = (
       request,
       reply,
       message = 'A valid administration session is required',
-      code: 'forbidden' | 'unauthorized' = 'unauthorized',
+      code: CredentialRejectionCode = 'unauthorized',
     ) => reject(request, reply, 'administration', message, code),
   );
 
@@ -229,11 +237,16 @@ export const registerAuthentication = (
 
       // The session is valid, so answering `unauthorized` would tell the
       // administration app that it expired and send the administrator back to
-      // the sign-in screen. The failure limit is left alone to match: a
-      // refused scope is not a failed credential, and counting it would let
-      // one disabled control lock its own administrator out of signing in.
+      // the sign-in screen. Its own code says which guard spoke, so a client
+      // can act on this refusal alone and report every other 403 on the route
+      // as itself. The code names ingestion rather than uploads because this
+      // guard also covers contributor registration, and a code has to stay
+      // true on every route that can produce it. The failure limit is left
+      // alone to match: a refused scope is not a failed credential, and
+      // counting it would let one disabled control lock its own administrator
+      // out of signing in.
       throw new ApiError(
-        'forbidden',
+        'administration_ingestion_disabled',
         'This server does not accept ingestion from an administration session',
       );
     }
