@@ -19,8 +19,8 @@ env:
 jobs:
   checks:
     name: Format, lint, typecheck, test, and build
-    runs-on: self-hosted
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -51,8 +51,8 @@ jobs:
   deployment-smoke:
     name: Compose startup, persistence, backup, and restore
     needs: checks
-    runs-on: self-hosted
-    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -66,8 +66,8 @@ jobs:
     name: Build and publish ${{ matrix.target }} image
     needs: [checks, deployment-smoke]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: self-hosted
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
