@@ -8,7 +8,7 @@ The MVP is complete when a permitted Telegram user can submit an image, the serv
 
 ## 2. Technical direction
 
-The repository will be an npm-workspaces TypeScript monorepo targeting Node.js 24 to match the established CI and container baseline of the deployment host.
+The repository will be an npm-workspaces TypeScript monorepo targeting Node.js 26 to match the established CI and container baseline of the deployment host.
 
 ```text
 home-gallery/

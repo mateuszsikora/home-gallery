@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ COPY packages packages
 
 RUN npm run build
 
-FROM node:24-bookworm-slim AS production-dependencies
+FROM node:26-bookworm-slim AS production-dependencies
 
 ENV NODE_ENV=production
 WORKDIR /app

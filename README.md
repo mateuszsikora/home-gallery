@@ -20,7 +20,7 @@ docker compose --env-file .env build
 
 ## Local development
 
-The foundation requires Node.js 24 and the npm version bundled with it. From a clean checkout:
+The foundation requires Node.js 26 and the npm version bundled with it. From a clean checkout:
 
 ```bash
 npm ci

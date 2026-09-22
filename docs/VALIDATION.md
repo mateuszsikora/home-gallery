@@ -18,7 +18,7 @@ The Compose scenario proves this sequence:
 
 Focused tests additionally cover image signatures, corruption, EXIF orientation, decoded-pixel limits, multipart limits, concurrent file-count reservations, upload cleanup after database failure, deletion rollback after database failure, startup cleanup, pagination, authorization on every administrative route, bounded server-side session storage and expiry, HttpOnly/SameSite/Secure cookie policy, CORS with credentials, CSRF, token and cookie redaction, absence of browser token storage, bounded Telegram downloads, delete-on-success bot behavior, contributor approval persistence and enforcement, slideshow recovery, and every administration mutation.
 
-Run the clean-checkout gates with Node.js 24:
+Run the clean-checkout gates with Node.js 26:
 
 ```bash
 npm ci
