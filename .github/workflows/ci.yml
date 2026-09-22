@@ -19,7 +19,7 @@ env:
 jobs:
   checks:
     name: Format, lint, typecheck, test, and build
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -51,7 +51,7 @@ jobs:
   deployment-smoke:
     name: Compose startup, persistence, backup, and restore
     needs: checks
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
@@ -66,7 +66,7 @@ jobs:
     name: Build and publish ${{ matrix.target }} image
     needs: [checks, deployment-smoke]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 30
     permissions:
       contents: read
@@ -125,7 +125,7 @@ jobs:
     name: Deploy Home Gallery over Tailscale
     needs: build-images
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     environment: production
     permissions:
