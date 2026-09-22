@@ -62,6 +62,7 @@ const hasValidCsrfHeader = (request: FastifyRequest): boolean =>
 
 declare module 'fastify' {
   interface FastifyInstance {
+    hasAdministrationAuthentication: (request: FastifyRequest) => boolean;
     requireAdministrationBearerToken: onRequestHookHandler;
     requireAdministrationSession: onRequestHookHandler;
     requireAdministrationToken: onRequestHookHandler;
@@ -151,6 +152,16 @@ export const registerAuthentication = (
     request.administrationSessionExpiresAt = record.expiresAt;
     return true;
   };
+
+  // Reports the same bearer and session checks without rejecting, for routes
+  // that answer an unauthenticated caller with their own uniform response
+  // instead of `unauthorized`.
+  app.decorate(
+    'hasAdministrationAuthentication',
+    (request: FastifyRequest): boolean =>
+      acceptAdministrationBearer(request) ||
+      acceptAdministrationSession(request),
+  );
 
   app.decorate('requireAdministrationBearerToken', (async (request, reply) => {
     if (!acceptAdministrationBearer(request)) {

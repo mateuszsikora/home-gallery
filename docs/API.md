@@ -46,6 +46,7 @@ Every non-successful response uses this shape:
 | `GET`    | `/api/media/{id}`                             | Admin         | None                                | Media record                       |
 | `PATCH`  | `/api/media/{id}`                             | Admin         | Non-empty media update              | Updated media record               |
 | `DELETE` | `/api/media/{id}`                             | Admin         | None                                | `204 No Content`                   |
+| `GET`    | `/api/media/{id}/content`                     | Admin         | None                                | Normalized image bytes             |
 | `GET`    | `/api/playlist`                               | Public        | None                                | Enabled media and gallery settings |
 | `GET`    | `/media/{id}`                                 | Public        | None                                | Normalized image bytes             |
 | `GET`    | `/api/settings`                               | Admin         | None                                | Gallery settings                   |
@@ -166,7 +167,9 @@ An unknown or malformed media identifier is reported as `not_found`.
 
 Items are listed in playlist order. `settings.playbackMode` tells the client whether to play them in that order or to shuffle them, so the response itself stays deterministic. `width` and `height` describe the stored image after its EXIF orientation has been applied, which is what lets the client resolve `settings.imageFit` per photo.
 
-`GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response, and all three cases answer identically so an unauthenticated caller cannot tell them apart.
+`GET /media/{id}` returns the normalized image bytes for an enabled item. Missing, disabled, or unavailable content uses the structured error response, and all three cases answer identically so an unauthenticated caller cannot tell them apart. Successful responses are immutable and carry an ETag, because stored bytes never change.
+
+`GET /api/media/{id}/content` returns the same bytes for a disabled item as well, which is how the administration app previews a photo it has hidden. It accepts the administration bearer token or the session cookie, so a plain `<img>` element authenticates itself, and it answers `no-store` because visibility is mutable state. A caller without a valid credential gets the same `not_found` response as one asking for an identifier that does not exist.
 
 ### Telegram contributors
 

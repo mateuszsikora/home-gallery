@@ -10,6 +10,8 @@ export const API_ROUTES = {
   telegramContributors: '/api/telegram/contributors',
   mediaById: (id: string): string => `/api/media/${encodeURIComponent(id)}`,
   mediaContentById: (id: string): string => `/media/${encodeURIComponent(id)}`,
+  adminMediaContentById: (id: string): string =>
+    `/api/media/${encodeURIComponent(id)}/content`,
   telegramContributorById: (telegramUserId: string): string =>
     `/api/telegram/contributors/${encodeURIComponent(telegramUserId)}`,
 } as const;

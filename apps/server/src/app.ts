@@ -29,7 +29,10 @@ import { registerAdminSessionRoutes } from './http/admin-session-routes.js';
 import { registerAuthentication } from './http/authentication.js';
 import { registerErrorHandling } from './http/errors.js';
 import { registerHealthRoute } from './http/health-route.js';
-import { registerMediaContentRoute } from './http/media-content-route.js';
+import {
+  registerAdminMediaContentRoute,
+  registerMediaContentRoute,
+} from './http/media-content-route.js';
 import { registerMediaRoutes } from './http/media-routes.js';
 import { registerMediaUploadRoute } from './http/media-upload-route.js';
 import { registerPlaylistRoute } from './http/playlist-route.js';
@@ -176,6 +179,7 @@ export const createApp = async (
     registerMediaUploadRoute(app);
     registerMediaRoutes(app);
     registerMediaContentRoute(app);
+    registerAdminMediaContentRoute(app);
     registerPlaylistRoute(app);
     registerSettingsRoutes(app);
     registerTelegramContributorRoutes(app);

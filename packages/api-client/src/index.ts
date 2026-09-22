@@ -98,6 +98,7 @@ export interface HomeGalleryClient {
   getPlaylist(): Promise<PlaylistResponse>;
   getMediaContent(id: MediaId): Promise<Blob>;
   getMediaContentUrl(id: MediaId): string;
+  getAdminMediaContentUrl(id: MediaId): string;
   getSettings(): Promise<GallerySettings>;
   updateSettings(input: GallerySettingsUpdateInput): Promise<GallerySettings>;
   registerTelegramContributor(
@@ -407,6 +408,14 @@ export const createHomeGalleryClient = (
     getMediaContentUrl: (id) => {
       const parsedId = mediaIdSchema.parse(id);
       return buildUrl(API_ROUTES.mediaContentById(parsedId)).toString();
+    },
+
+    // Hidden media is only readable through the administrative route, and the
+    // session cookie travels with the element that loads the URL, so this is
+    // deliberately a URL rather than a request.
+    getAdminMediaContentUrl: (id) => {
+      const parsedId = mediaIdSchema.parse(id);
+      return buildUrl(API_ROUTES.adminMediaContentById(parsedId)).toString();
     },
 
     getSettings: () =>
