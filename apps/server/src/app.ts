@@ -199,27 +199,6 @@ export const createApp = async (
     registerSettingsRoutes(app);
     registerTelegramContributorRoutes(app);
 
-    const thumbnailBackfill = startThumbnailBackfill({
-      log: app.log,
-      mediaRepository: app.mediaRepository,
-      mediaStorage: storage,
-    });
-    app.decorate('thumbnailBackfill', thumbnailBackfill);
-
-    // The backfill reads the database, so it has to stop before the connection
-    // closes; that is why closing the connection lives in this hook.
-    app.addHook('onClose', async () => {
-      thumbnailBackfill.stop();
-      await thumbnailBackfill.finished;
-      database.close();
-    });
-
-    void thumbnailBackfill.finished.then((result) => {
-      if (result.created > 0 || result.failed > 0 || result.stopped) {
-        app.log.info(result, 'Administration thumbnail backfill finished');
-      }
-    });
-
     app.log.info(
       {
         dataDirectory: config.dataDirectory,
@@ -248,6 +227,29 @@ export const createApp = async (
         'No administration password is set; anyone who can reach this server can administer the gallery',
       );
     }
+
+    // Started last, after everything that can still throw: a pass running while
+    // `createApp` fails would read a database its own caller is about to close.
+    const thumbnailBackfill = startThumbnailBackfill({
+      log: app.log,
+      mediaRepository: app.mediaRepository,
+      mediaStorage: storage,
+    });
+    app.decorate('thumbnailBackfill', thumbnailBackfill);
+
+    // The backfill reads the database, so it has to stop before the connection
+    // closes; that is why closing the connection lives in this hook.
+    app.addHook('onClose', async () => {
+      thumbnailBackfill.stop();
+      await thumbnailBackfill.finished;
+      database.close();
+    });
+
+    void thumbnailBackfill.finished.then((result) => {
+      if (result.created > 0 || result.failed > 0 || result.stopped) {
+        app.log.info(result, 'Administration thumbnail backfill finished');
+      }
+    });
 
     return app;
   } catch (error) {

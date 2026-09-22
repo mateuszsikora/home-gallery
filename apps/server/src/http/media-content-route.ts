@@ -5,7 +5,11 @@ import {
 } from '@home-gallery/shared-types';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
-import { IMMUTABLE_CACHE_CONTROL, NO_STORE_CACHE_CONTROL } from './cache.js';
+import {
+  IMMUTABLE_CACHE_CONTROL,
+  NO_STORE_CACHE_CONTROL,
+  PRIVATE_REVALIDATE_CACHE_CONTROL,
+} from './cache.js';
 import { ApiError } from './errors.js';
 import { thumbnailFilename } from '../media/thumbnails.js';
 import type { OpenMediaFile } from '../storage/media-storage.js';
@@ -138,8 +142,17 @@ export const registerAdminMediaContentRoute = (app: FastifyInstance): void => {
  *
  * The derivative is written after the upload and backfilled at startup, so it
  * can legitimately be absent; the full image is served in its place instead of
- * failing the card. Authentication, visibility, and caching behave exactly like
- * the administrative content route.
+ * failing the card. Authentication and visibility behave exactly like the
+ * administrative content route.
+ *
+ * Unlike that route this one revalidates instead of refusing to be stored. Both
+ * answers are identical for a hidden and a visible photo, so no part of the
+ * response depends on the mutable state that made `no-store` necessary there,
+ * and `no-cache` still forces an authenticated round trip before a stored copy
+ * is used. That turns a reload of a whole library into conditional requests
+ * rather than the whole library again. The validator distinguishes the
+ * derivative from the full-image fallback, so a client holding the fallback
+ * stops using it once the backfill catches up.
  */
 export const registerAdminMediaThumbnailRoute = (
   app: FastifyInstance,
@@ -152,13 +165,22 @@ export const registerAdminMediaThumbnailRoute = (
       }
 
       const record = requireRecord(app, request, true);
-      const file =
-        (await app.mediaStorage.openForRead(
-          thumbnailFilename(record.storedFilename),
-        )) ?? (await openStoredImage(app, request, record));
+      const derivative = await app.mediaStorage.openForRead(
+        thumbnailFilename(record.storedFilename),
+      );
+      const file = derivative ?? (await openStoredImage(app, request, record));
+      const etag = `"${record.id}${derivative === undefined ? '-full' : '-thumb'}"`;
+
+      reply
+        .header('cache-control', PRIVATE_REVALIDATE_CACHE_CONTROL)
+        .header('etag', etag);
+
+      if (request.headers['if-none-match'] === etag) {
+        file.stream.destroy();
+        return reply.status(304).send();
+      }
 
       return reply
-        .header('cache-control', NO_STORE_CACHE_CONTROL)
         .header('content-length', file.size)
         .type(record.mimeType)
         .send(file.stream);

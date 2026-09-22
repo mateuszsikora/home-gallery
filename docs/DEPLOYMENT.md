@@ -268,7 +268,7 @@ bash deploy.sh
 
 Always take a backup before upgrading. A future release may include a database migration that older application code cannot read. In that case, restore the backup made immediately before the upgrade as well as pinning the older image tag.
 
-The first start after upgrading past the release that introduced administration previews generates a preview derivative for every photograph already stored. The pass runs in the background, one photograph at a time, so the server answers requests throughout it and logs `Administration thumbnail backfill finished` when it is done. Until a photograph has its derivative, its administration card loads the full image as before. An interrupted pass resumes on the next start.
+The first start after upgrading past the release that introduced administration previews generates a preview derivative for every photograph already stored. The pass runs in the background, one photograph at a time, so the server answers requests throughout it and logs `Administration thumbnail backfill finished` when it is done. Until a photograph has its derivative, its administration card loads the full image as before. An interrupted pass resumes on the next start. Ten failures in a row — a full volume, an unwritable media directory — abandon the pass with `Giving up on administration thumbnails after repeated failures` rather than logging one line per photograph; fix the storage and restart.
 
 ## Continuous integration
 

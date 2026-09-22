@@ -98,6 +98,40 @@ describe('administration thumbnail backfill', () => {
     ).resolves.toBeDefined();
   });
 
+  it('gives up instead of logging a line per photograph when storage fails', async () => {
+    // A full volume or an unwritable media directory fails every record, which
+    // unreadable stored bytes reproduce without touching the filesystem.
+    for (let index = 0; index < 12; index += 1) {
+      await storeTestMedia(app);
+    }
+
+    await expect(backfill().finished).resolves.toEqual({
+      created: 0,
+      failed: 10,
+      stopped: true,
+    });
+  });
+
+  it('skips a record deleted after the pass listed the library', async () => {
+    const { record } = await storeTestImage(app);
+    const survivor = await storeTestImage(app);
+
+    const pass = backfill();
+    app.mediaRepository.delete(record.id);
+
+    await expect(pass.finished).resolves.toMatchObject({ stopped: false });
+    await expect(
+      app.mediaStorage.exists(
+        thumbnailFilename(survivor.record.storedFilename),
+      ),
+    ).resolves.toBe(true);
+    // Whichever side of the deletion the pass was on, it leaves no derivative
+    // that nothing points at.
+    await expect(
+      app.mediaStorage.exists(thumbnailFilename(record.storedFilename)),
+    ).resolves.toBe(false);
+  });
+
   it('leaves no temporary files behind', async () => {
     await storeTestImage(app);
     await storeTestMedia(app);

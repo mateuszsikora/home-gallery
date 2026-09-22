@@ -260,7 +260,7 @@ describe('GET /api/media/{id}/thumbnail', () => {
     return { ...stored, thumbnail };
   };
 
-  it('serves the derivative instead of the full image and forbids storing it', async () => {
+  it('serves the derivative instead of the full image', async () => {
     const { record, thumbnail } = await storeWithThumbnail();
 
     const response = await app.inject({
@@ -274,8 +274,36 @@ describe('GET /api/media/{id}/thumbnail', () => {
     expect(response.headers['content-length']).toBe(
       String(thumbnail.byteLength),
     );
-    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['cache-control']).toBe('private, no-cache');
+    expect(response.headers.etag).toBe(`"${record.id}-thumb"`);
     expect(response.rawPayload.equals(thumbnail)).toBe(true);
+  });
+
+  it('revalidates a stored preview instead of sending it again', async () => {
+    const { record } = await storeWithThumbnail();
+    const cookie = await createTestAdminSession(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { cookie, 'if-none-match': `"${record.id}-thumb"` },
+    });
+
+    expect(response.statusCode).toBe(304);
+    expect(response.headers['cache-control']).toBe('private, no-cache');
+    expect(response.rawPayload).toHaveLength(0);
+  });
+
+  it('refuses to revalidate a preview for a caller without a session', async () => {
+    const { record } = await storeWithThumbnail();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { 'if-none-match': `"${record.id}-thumb"` },
+    });
+
+    expectUnavailable(response.statusCode, response.json());
   });
 
   it('previews a hidden photo the same way', async () => {
@@ -288,7 +316,7 @@ describe('GET /api/media/{id}/thumbnail', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['cache-control']).toBe('private, no-cache');
     expect(response.rawPayload.equals(thumbnail)).toBe(true);
   });
 
@@ -302,8 +330,32 @@ describe('GET /api/media/{id}/thumbnail', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['cache-control']).toBe('private, no-cache');
+    expect(response.headers.etag).toBe(`"${record.id}-full"`);
     expect(response.rawPayload.equals(bytes)).toBe(true);
+  });
+
+  it('stops honouring a fallback validator once the derivative exists', async () => {
+    const { record } = await storeTestImage(app);
+    const cookie = await createTestAdminSession(app);
+    const fallbackEtag = `"${record.id}-full"`;
+
+    await writeFile(
+      app.mediaStorage.resolveMediaPath(
+        thumbnailFilename(record.storedFilename),
+      ),
+      'thumbnail bytes',
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: API_ROUTES.adminMediaThumbnailById(record.id),
+      headers: { cookie, 'if-none-match': fallbackEtag },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers.etag).toBe(`"${record.id}-thumb"`);
+    expect(response.body).toBe('thumbnail bytes');
   });
 
   it('answers an unauthenticated caller exactly like an unknown identifier', async () => {

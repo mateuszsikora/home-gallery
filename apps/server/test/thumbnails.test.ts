@@ -55,8 +55,11 @@ describe('createThumbnail', () => {
     return path;
   };
 
+  // The sources stay modest on purpose: a 12-megapixel one proves nothing more
+  // than a 2-megapixel one about the bound, and encoding it in one of many
+  // parallel workers ran into the default test timeout.
   it('bounds the longest edge and keeps the aspect ratio', async () => {
-    const source = await writeSource(4_000, 3_000);
+    const source = await writeSource(1_600, 1_200);
     const output = join(directory, 'landscape.thumb.webp');
 
     await createThumbnail(source, output);
@@ -68,7 +71,7 @@ describe('createThumbnail', () => {
   });
 
   it('bounds the longest edge of a portrait image as well', async () => {
-    const source = await writeSource(1_500, 3_000);
+    const source = await writeSource(800, 1_600);
     const output = join(directory, 'portrait.thumb.webp');
 
     await createThumbnail(source, output);
