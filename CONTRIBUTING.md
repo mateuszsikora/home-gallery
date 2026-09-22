@@ -18,18 +18,20 @@ Open an issue before writing code for anything larger than a small fix. This is 
 
 ## Pull requests
 
-One issue per pull request. Before opening one:
+One issue per pull request. Repository chores — documentation, CI configuration, dependency bumps — may replace `Closes #<issue-number>` with a one-line reason instead.
+
+The project builds on Node.js 26, pinned in `.nvmrc`. Before opening a pull request:
 
 ```bash
 npm ci
 npm run check
 ```
 
-`npm run check` runs the CI sequence: `format:check`, `lint`, `typecheck`, `test`, and `build`. Changes to the Compose stack, the images, or the deployment scripts also need `npm run test:compose`, which exercises upload, restart persistence, backup, and restore in a disposable Compose project.
+`npm run check` runs the same checks as the first CI job: `format:check`, `lint`, `typecheck`, `test`, and `build`. CI then runs two deployment checks that `npm run check` does not cover. Changes to the Compose stack, the images, or the deployment scripts need `npm run test:compose`, which exercises upload, restart persistence, backup, and restore in a disposable Compose project. Changes to the TLS profile — `docker-compose.tls.yml`, `docker/Caddyfile`, or the TLS guard in `infra/deploy.sh` — also need `npm run test:tls-config`.
 
 A pull request should:
 
-- use an English title and description, and close its issue with `Closes #<issue-number>`;
+- use an English title and description, and either close its issue with `Closes #<issue-number>` or say in one line why there is no issue;
 - summarize the behavior delivered rather than the files touched;
 - list the validation commands that were run, and their results;
 - cover new behavior with automated tests;

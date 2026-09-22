@@ -210,7 +210,7 @@ Home Gallery is developed by coding agents, one GitHub issue per pull request. A
 
 ## Status and contributing
 
-This is a personal project, published so others can read, fork, and adapt it. It is maintained on a best-effort basis: issues and pull requests are welcome, but there is no support commitment and no release schedule. Run it on a trusted network and read [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
+This is a personal project, published so others can read, fork, and adapt it, and maintained on a best-effort basis. Issues and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) covers what a useful bug report needs and the bar a pull request has to clear. Run it on a trusted network and read [docs/VALIDATION.md](docs/VALIDATION.md) before exposing it more widely.
 
 ## License
 
