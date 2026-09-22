@@ -211,7 +211,7 @@ describe('administration password routes', () => {
     // header its own request failed to send.
     expect(response.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
-      'forbidden',
+      'csrf_required',
     );
     expect(await passwordConfigured()).toBe(false);
   });

@@ -166,7 +166,7 @@ export const registerAuthentication = (
 
     if (!SAFE_METHODS.has(request.method) && !hasValidCsrfHeader(request)) {
       throw new ApiError(
-        'forbidden',
+        'csrf_required',
         `Cookie-authenticated mutations require ${ADMIN_SESSION_CSRF_HEADER}`,
       );
     }

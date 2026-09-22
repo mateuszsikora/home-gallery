@@ -154,6 +154,30 @@ describe('telegram contributor routes', () => {
       );
       expect(app.telegramContributorRepository.list()).toEqual([]);
     });
+
+    it('admits an administration session wherever the upload flag is on', async () => {
+      // `HOME_GALLERY_ALLOW_ADMIN_UPLOADS` is named for uploads but switches
+      // the shared ingestion guard, so it opens this route too. Documented in
+      // docs/DEPLOYMENT.md and pinned here, because a deployment setting whose
+      // reach is only described in prose is a setting nobody can rely on.
+      await app.close();
+      app = await createApp(
+        createTestConfig(dataDirectory, { allowAdministrationUploads: true }),
+      );
+
+      const response = await app.inject({
+        method: 'POST',
+        url: API_ROUTES.telegramContributors,
+        headers: adminMutationHeaders(await createTestAdminSession(app)),
+        payload: { telegramUserId: '123' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(telegramContributorSchema.parse(response.json())).toMatchObject({
+        telegramUserId: '123',
+        status: 'pending',
+      });
+    });
   });
 
   describe('GET /api/telegram/contributors', () => {
@@ -293,7 +317,7 @@ describe('telegram contributor routes', () => {
       expect(listed.statusCode).toBe(200);
       expect(withoutCsrf.statusCode).toBe(403);
       expect(apiErrorBodySchema.parse(withoutCsrf.json()).error.code).toBe(
-        'forbidden',
+        'csrf_required',
       );
       expect(withCsrf.statusCode).toBe(200);
       expect(telegramContributorSchema.parse(withCsrf.json()).status).toBe(

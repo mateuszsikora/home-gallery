@@ -121,7 +121,7 @@ describe('administration session routes', () => {
 
     expect(response.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
-      'forbidden',
+      'csrf_required',
     );
   });
 
@@ -192,7 +192,7 @@ describe('administration session routes', () => {
 
     expect(withoutCsrf.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(withoutCsrf.json()).error.code).toBe(
-      'forbidden',
+      'csrf_required',
     );
     expect(withCsrf.statusCode).toBe(200);
   });

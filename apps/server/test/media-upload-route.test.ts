@@ -286,7 +286,7 @@ describe('POST /api/media', () => {
 
     expect(response.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
-      'forbidden',
+      'contributor_not_approved',
     );
     await expectEmptyStorage();
   });
@@ -400,7 +400,7 @@ describe('POST /api/media', () => {
     // status would report a missing header as a capability the server withdrew.
     expect(response.statusCode).toBe(403);
     expect(apiErrorBodySchema.parse(response.json()).error.code).toBe(
-      'forbidden',
+      'csrf_required',
     );
     await expectEmptyStorage();
   });

@@ -8,14 +8,16 @@ export const API_ERROR_CODES = [
   'bad_request',
   'validation_failed',
   'unauthorized',
-  // Several unrelated guards refuse with 403, so the causes a client acts on
-  // differently carry their own code. `forbidden` stays the refusal whose cause
-  // the response does not name, and no client may read a cause into it. A named
-  // code must hold on every route that can produce it, or it becomes the same
-  // wrong inference one layer down.
+  // Several unrelated guards refuse with 403, so each one carries its own code
+  // and no client has to read a cause into the status. A named code must hold
+  // on every route that can produce it, or it becomes the same wrong inference
+  // one layer down. `forbidden` is left for a refusal this contract does not
+  // name — today only a 403 raised by the framework rather than by a guard.
   'forbidden',
   'invalid_password',
   'administration_ingestion_disabled',
+  'csrf_required',
+  'contributor_not_approved',
   'not_found',
   'conflict',
   'payload_too_large',
@@ -55,6 +57,8 @@ export const API_ERROR_STATUS: Record<ApiErrorCode, number> = {
   forbidden: 403,
   invalid_password: 403,
   administration_ingestion_disabled: 403,
+  csrf_required: 403,
+  contributor_not_approved: 403,
   not_found: 404,
   conflict: 409,
   payload_too_large: 413,

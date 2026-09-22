@@ -396,7 +396,7 @@ describe('AdminApp', () => {
         'Cookie-authenticated mutations require x-home-gallery-csrf',
         {
           error: {
-            code: 'forbidden',
+            code: 'csrf_required',
             message:
               'Cookie-authenticated mutations require x-home-gallery-csrf',
           },
@@ -618,7 +618,7 @@ describe('AdminApp', () => {
         'Cookie-authenticated mutations require x-home-gallery-csrf',
         {
           error: {
-            code: 'forbidden',
+            code: 'csrf_required',
             message:
               'Cookie-authenticated mutations require x-home-gallery-csrf',
           },
