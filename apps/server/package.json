@@ -17,7 +17,7 @@
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "11.3.0",
-    "@fastify/multipart": "10.1.1",
+    "@fastify/multipart": "10.1.2",
     "@home-gallery/config": "^0.0.0",
     "@home-gallery/shared-types": "^0.0.0",
     "better-sqlite3": "13.0.3",
