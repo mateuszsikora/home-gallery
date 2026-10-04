@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -27,9 +26,12 @@ export interface PlaybackState {
  * Fetches a photo ahead of its turn. The returned promise settles once the
  * photo is decoded and can be painted in the frame it is attached to the page,
  * which is what lets the slideshow hold a slide instead of cutting to an empty
- * frame.
+ * frame. Implementations should release pending work when the signal aborts.
  */
-export type PreloadImage = (url: string) => Promise<void> | void;
+export type PreloadImage = (
+  url: string,
+  signal?: AbortSignal,
+) => Promise<void> | void;
 
 export interface GalleryProps {
   readonly apiBaseUrl: string;
@@ -44,13 +46,9 @@ const DEFAULT_REFRESH_INTERVAL_MS = 30_000;
 /** How many upcoming photos are fetched and decoded ahead of their turn. */
 const PRELOAD_AHEAD = 2;
 
-/**
- * How long a slide may overstay its turn while the next photo is still being
- * fetched. Lingering on a photo reads as a slower slideshow; cutting to an
- * empty frame reads as a fault, so waiting is the calmer failure. The cap keeps
- * a photo that never arrives from stopping the slideshow altogether.
- */
-const MAX_HOLD_FOR_NEXT_MS = 5_000;
+/** Bound each attempt and pause between unsuccessful passes through the playlist. */
+const PRELOAD_TIMEOUT_MS = 5_000;
+const RETRY_DELAY_MS = 5_000;
 
 /**
  * How a slide is laid out: letterboxed, letterboxed over a blurred copy of
@@ -69,24 +67,44 @@ const ASPECT_MATCH_TOLERANCE = 0.01;
  */
 const AUTO_COVER_LOSS_LIMIT = 0.3;
 
-const defaultPreloadImage: PreloadImage = async (url) => {
-  const image = new Image();
-  image.decoding = 'async';
-  image.src = url;
+const defaultPreloadImage: PreloadImage = (url, signal) =>
+  new Promise<void>((resolve, reject) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      signal?.removeEventListener('abort', abort);
+      if (error !== undefined) {
+        image.removeAttribute('src');
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    const abort = (): void => finish(new Error('Image preload cancelled'));
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
 
-  // `decode` is missing outside a browser, where nothing loads anyway and the
-  // photo is reported ready straight away.
-  if (typeof image.decode !== 'function') {
-    return;
-  }
-
-  try {
-    await image.decode();
-  } catch {
-    // A file the browser cannot decode is treated as ready: it will not decode
-    // on a later attempt either, so one broken photo must not stall playback.
-  }
-};
+    image.decoding = 'async';
+    image.onerror = () => finish(new Error('Image preload failed'));
+    // Older WebViews without decode still have to finish loading the image.
+    if (typeof image.decode !== 'function') {
+      image.onload = () => finish();
+      image.src = url;
+    } else {
+      image.src = url;
+      void image.decode().then(
+        () => finish(),
+        () => finish(new Error('Image decode failed')),
+      );
+    }
+  });
 
 const arraysEqual = (
   left: readonly string[],
@@ -225,21 +243,21 @@ const useViewportAspect = (): number => {
   return aspect;
 };
 
-const itemById = (
-  playlist: PlaylistResponse,
-  id: string | undefined,
-): PlaylistItem | undefined => playlist.items.find((item) => item.id === id);
+interface LoadedSlide {
+  readonly item: PlaylistItem;
+  readonly source: string;
+}
 
 const slideElement = (
-  item: PlaylistItem,
-  apiBaseUrl: string,
+  { item, source }: LoadedSlide,
   state: 'current' | 'previous',
   layout: SlideLayout,
 ): ReactElement => {
-  const source = resolveContentUrl(item.contentUrl, apiBaseUrl);
-
   return (
-    <div className={`gallery__slide gallery__slide--${state}`} key={item.id}>
+    <div
+      className={`gallery__slide gallery__slide--${state}`}
+      key={`${item.id}:${source}`}
+    >
       {layout === 'blurred' ? (
         <img alt="" aria-hidden className="gallery__backdrop" src={source} />
       ) : null}
@@ -266,17 +284,14 @@ export const Gallery = ({
   const [playlist, setPlaylist] = useState<PlaylistResponse>();
   const [connectionFailed, setConnectionFailed] = useState(false);
   const viewportAspect = useViewportAspect();
-  const [previousId, setPreviousId] = useState<string>();
-  const [playback, setPlayback] = useState<PlaybackState>({
+  const [currentSlide, setCurrentSlide] = useState<LoadedSlide>();
+  const [previousSlide, setPreviousSlide] = useState<LoadedSlide>();
+  const displayed = useRef<LoadedSlide | undefined>(undefined);
+  const playback = useRef<PlaybackState>({
     currentId: undefined,
     mode: 'sequential',
     order: [],
   });
-  const [readyIds, setReadyIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const [advanceRequested, setAdvanceRequested] = useState(false);
-  const requestedIds = useRef(new Set<string>());
 
   useEffect(() => {
     let disposed = false;
@@ -293,7 +308,16 @@ export const Gallery = ({
         const nextPlaylist = await client.getPlaylist();
 
         if (!disposed) {
-          setPlaylist(nextPlaylist);
+          setPlaylist((previous) => ({
+            ...nextPlaylist,
+            // Identical polls must not restart playback or pending retries.
+            items:
+              previous !== undefined &&
+              JSON.stringify(previous.items) ===
+                JSON.stringify(nextPlaylist.items)
+                ? previous.items
+                : nextPlaylist.items,
+          }));
           setConnectionFailed(false);
         }
       } catch {
@@ -316,170 +340,171 @@ export const Gallery = ({
     };
   }, [client, refreshIntervalMs]);
 
-  useEffect(() => {
-    if (playlist === undefined) {
-      return;
-    }
-
-    setPlayback((previous) =>
-      reconcilePlayback(
-        previous,
-        playlist.items,
-        playlist.settings.playbackMode,
-        random,
-      ),
-    );
-  }, [playlist, random]);
-
-  const nextId = useMemo(() => {
-    const { currentId, order } = playback;
-
-    if (currentId === undefined || order.length < 2) {
-      return undefined;
-    }
-
-    const currentIndex = order.indexOf(currentId);
-
-    return currentIndex < 0
-      ? undefined
-      : order[(currentIndex + 1) % order.length];
-  }, [playback]);
-
-  useEffect(() => {
-    if (nextId === undefined) {
-      return;
-    }
-
-    const slideTimer = window.setTimeout(() => {
-      setAdvanceRequested(true);
-    }, playlist?.settings.slideDurationMs ?? 0);
-
-    return () => {
-      window.clearTimeout(slideTimer);
-    };
-  }, [nextId, playlist?.settings.slideDurationMs]);
-
-  /**
-   * The swap waits for the next photo to be decoded. Without the wait the new
-   * slide is attached while its image is still loading, so the old photo fades
-   * away to an empty frame and the new one appears at full opacity the moment
-   * it arrives — the hardest cut in the loop, and the most likely one right
-   * after the last photo, where the upcoming photo has not been touched since
-   * the slideshow started.
-   */
-  useEffect(() => {
-    if (!advanceRequested || nextId === undefined) {
-      return;
-    }
-
-    // `nextId` is derived from the same playback this effect is keyed to, so a
-    // playlist change cancels the pending swap and schedules it again.
-    const advance = (): void => {
-      setPreviousId(playback.currentId);
-      setPlayback((current) => ({ ...current, currentId: nextId }));
-      setAdvanceRequested(false);
-    };
-
-    if (readyIds.has(nextId)) {
-      advance();
-
-      return;
-    }
-
-    const holdTimer = window.setTimeout(advance, MAX_HOLD_FOR_NEXT_MS);
-
-    return () => {
-      window.clearTimeout(holdTimer);
-    };
-  }, [advanceRequested, nextId, playback, readyIds]);
-
-  useEffect(() => {
-    if (previousId === undefined) {
-      return;
-    }
-
-    const fadeTimer = window.setTimeout(() => {
-      setPreviousId(undefined);
-    }, playlist?.settings.fadeDurationMs ?? 0);
-
-    return () => {
-      window.clearTimeout(fadeTimer);
-    };
-  }, [playlist?.settings.fadeDurationMs, previousId]);
+  const items = playlist?.items;
+  const mode = playlist?.settings.playbackMode;
+  const slideDurationMs = playlist?.settings.slideDurationMs;
 
   useEffect(() => {
     if (
-      playlist === undefined ||
-      playback.currentId === undefined ||
-      playback.order.length < 2
+      items === undefined ||
+      mode === undefined ||
+      slideDurationMs === undefined
     ) {
       return;
     }
 
-    const currentIndex = playback.order.indexOf(playback.currentId);
-    const preloadCount = Math.min(PRELOAD_AHEAD, playback.order.length - 1);
-    const upcoming: PlaylistItem[] = [];
-
-    for (let offset = 1; offset <= preloadCount; offset += 1) {
-      const id =
-        playback.order[(currentIndex + offset) % playback.order.length];
-      const item = itemById(playlist, id);
-
-      if (item !== undefined) {
-        upcoming.push(item);
-      }
+    playback.current = reconcilePlayback(playback.current, items, mode, random);
+    if (items.length === 0) {
+      displayed.current = undefined;
+      setCurrentSlide(undefined);
+      setPreviousSlide(undefined);
+      return;
     }
 
-    // Only the photos around the playhead stay marked. A photo the browser may
-    // have dropped from its cache during a long loop is fetched again before
-    // its turn instead of being trusted on a stale mark.
-    const tracked = new Set([
-      playback.currentId,
-      ...upcoming.map(({ id }) => id),
-    ]);
-
-    for (const id of requestedIds.current) {
-      if (!tracked.has(id)) {
-        requestedIds.current.delete(id);
-      }
-    }
-
-    setReadyIds((previous) => {
-      const retained = [...previous].filter((id) => tracked.has(id));
-
-      return retained.length === previous.size ? previous : new Set(retained);
+    const ordered = playback.current.order.map((id) => {
+      const item = items.find((candidate) => candidate.id === id)!;
+      return { item, source: resolveContentUrl(item.contentUrl, apiBaseUrl) };
     });
-
-    for (const item of upcoming) {
-      if (requestedIds.current.has(item.id)) {
-        continue;
+    let disposed = false;
+    let cancelDelay: (() => void) | undefined;
+    const requests = new Map<
+      LoadedSlide,
+      {
+        result: Promise<boolean>;
+        cancel: () => void;
       }
+    >();
 
-      requestedIds.current.add(item.id);
+    const delay = (durationMs: number): Promise<void> =>
+      new Promise((resolve) => {
+        const timer = window.setTimeout(resolve, durationMs);
+        cancelDelay = () => {
+          window.clearTimeout(timer);
+          resolve();
+        };
+      });
+    const request = (slide: LoadedSlide): Promise<boolean> => {
+      const existing = requests.get(slide);
+      if (existing !== undefined) return existing.result;
 
-      void (async () => {
-        try {
-          await preloadImage(resolveContentUrl(item.contentUrl, apiBaseUrl));
-        } catch {
-          // A failed fetch is left unmarked and unrequested so the next pass
-          // retries it; the hold cap keeps the slideshow moving meanwhile.
-          requestedIds.current.delete(item.id);
-
-          return;
-        }
-
-        // The playhead may have moved past this photo while it loaded, in
-        // which case its mark was already dropped and must not come back.
-        if (!requestedIds.current.has(item.id)) {
-          return;
-        }
-
-        setReadyIds((previous) =>
-          previous.has(item.id) ? previous : new Set(previous).add(item.id),
+      const controller = new AbortController();
+      let finish: (ready: boolean) => void = () => {};
+      const result = new Promise<boolean>((resolve) => {
+        let settled = false;
+        const timer = window.setTimeout(
+          () => finish(false),
+          PRELOAD_TIMEOUT_MS,
         );
-      })();
-    }
-  }, [apiBaseUrl, playback, playlist, preloadImage]);
+        finish = (ready) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          if (!ready) controller.abort();
+          resolve(ready);
+        };
+      });
+      requests.set(slide, { result, cancel: () => finish(false) });
+      // Catch both synchronous preloader errors and asynchronous decode failures.
+      void Promise.resolve()
+        .then(() => {
+          if (disposed || controller.signal.aborted) return;
+          return preloadImage(slide.source, controller.signal);
+        })
+        .then(
+          () => finish(true),
+          () => finish(false),
+        );
+      return result;
+    };
+    const prepare = (candidates: readonly LoadedSlide[]): void => {
+      const upcoming = candidates.slice(0, PRELOAD_AHEAD);
+      for (const [slide, pending] of requests) {
+        if (!upcoming.includes(slide)) {
+          pending.cancel();
+          requests.delete(slide);
+        }
+      }
+      for (const slide of upcoming) void request(slide);
+    };
+    const candidatesAfterCurrent = (): LoadedSlide[] => {
+      const currentIndex = ordered.findIndex(
+        (slide) =>
+          slide.item.id === displayed.current?.item.id &&
+          slide.source === displayed.current.source,
+      );
+      return currentIndex < 0
+        ? ordered
+        : [
+            ...ordered.slice(currentIndex + 1),
+            ...ordered.slice(0, currentIndex),
+          ];
+    };
+
+    const run = async (): Promise<void> => {
+      let candidates = candidatesAfterCurrent();
+      // A retained photo gets its normal display time after a settings change.
+      // A removed/replaced photo stays visible only until a replacement is ready.
+      if (candidates.length < ordered.length) {
+        prepare(candidates);
+        if (candidates.length === 0) return;
+        await delay(slideDurationMs);
+      }
+      while (!disposed) {
+        let advanced = false;
+        for (
+          let index = 0;
+          index < candidates.length && !disposed;
+          index += 1
+        ) {
+          prepare(candidates.slice(index));
+          const candidate = candidates[index]!;
+          const ready = await request(candidate);
+          if (disposed) return;
+          if (!ready) continue;
+
+          setPreviousSlide(displayed.current);
+          displayed.current = candidate;
+          setCurrentSlide(candidate);
+          playback.current = {
+            ...playback.current,
+            currentId: candidate.item.id,
+          };
+          advanced = true;
+          break;
+        }
+        if (disposed) return;
+        if (advanced) {
+          candidates = candidatesAfterCurrent();
+          prepare(candidates);
+          if (candidates.length === 0) return;
+          await delay(slideDurationMs);
+        } else {
+          // Even synchronous failures get a full pause before another pass.
+          // At most PRELOAD_AHEAD requests can be alive at any time.
+          for (const pending of requests.values()) pending.cancel();
+          requests.clear();
+          await delay(RETRY_DELAY_MS);
+          candidates = candidatesAfterCurrent();
+        }
+      }
+    };
+    void run();
+
+    return () => {
+      disposed = true;
+      cancelDelay?.();
+      for (const pending of requests.values()) pending.cancel();
+      requests.clear();
+    };
+  }, [apiBaseUrl, items, mode, preloadImage, random, slideDurationMs]);
+
+  useEffect(() => {
+    if (previousSlide === undefined) return;
+    const timer = window.setTimeout(() => {
+      setPreviousSlide(undefined);
+    }, playlist?.settings.fadeDurationMs ?? 0);
+    return () => window.clearTimeout(timer);
+  }, [playlist?.settings.fadeDurationMs, previousSlide]);
 
   if (playlist === undefined) {
     return (
@@ -505,8 +530,6 @@ export const Gallery = ({
     );
   }
 
-  const currentItem = itemById(playlist, playback.currentId);
-  const previousItem = itemById(playlist, previousId);
   const galleryStyle = {
     '--fade-duration': `${playlist.settings.fadeDurationMs}ms`,
   } as CSSProperties;
@@ -515,20 +538,19 @@ export const Gallery = ({
 
   return (
     <main aria-label="Photo gallery" className="gallery" style={galleryStyle}>
-      {currentItem === undefined ? (
+      {currentSlide === undefined ? (
         <p aria-live="polite" className="gallery__status" role="status">
-          Preparing gallery…
+          Waiting for photos to load. Retrying automatically.
         </p>
       ) : (
-        slideElement(currentItem, apiBaseUrl, 'current', layoutFor(currentItem))
+        slideElement(currentSlide, 'current', layoutFor(currentSlide.item))
       )}
-      {previousItem === undefined
+      {previousSlide === undefined
         ? null
         : slideElement(
-            previousItem,
-            apiBaseUrl,
+            previousSlide,
             'previous',
-            layoutFor(previousItem),
+            layoutFor(previousSlide.item),
           )}
       {connectionFailed ? (
         <p aria-live="polite" className="gallery__status" role="status">
