@@ -20,7 +20,11 @@ Open an issue before writing code for anything larger than a small fix. This is 
 
 One issue per pull request. Repository chores — documentation, CI configuration, dependency bumps — may replace `Closes #<issue-number>` with a one-line reason instead.
 
-The project builds on Node.js 26, pinned in `.nvmrc`. Before opening a pull request:
+The project builds on Node.js 26, pinned in `.nvmrc`.
+
+Typechecking and builds use TypeScript 7 through the `@typescript/native` npm alias, which supplies `tsc`. ESLint still needs the TypeScript 6 compiler API, so the `typescript` dependency aliases `@typescript/typescript6`, which supplies `tsc6` without conflicting with `tsc`. This follows [Microsoft's side-by-side configuration](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0). Keep both aliases when updating the compiler until the lint tooling supports the new API.
+
+Before opening a pull request:
 
 ```bash
 npm ci
