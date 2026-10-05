@@ -1519,3 +1519,142 @@ describe('Gallery retained image elements', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Waiting for photos');
   });
 });
+
+describe('Gallery display variants', () => {
+  const variantPlaylist = () => {
+    const playlist = createPlaylist(
+      [ids.first],
+      {},
+      { width: 6000, height: 4000 },
+    );
+    playlist.items[0]!.variants = [
+      {
+        contentUrl: `/media/${ids.first}/display/v1/1280`,
+        width: 1280,
+        height: 853,
+      },
+      {
+        contentUrl: `/media/${ids.first}/display/v1/1920`,
+        width: 1920,
+        height: 1280,
+      },
+      {
+        contentUrl: `/media/${ids.first}/display/v1/2560`,
+        width: 2560,
+        height: 1707,
+      },
+    ];
+    return playlist;
+  };
+  it('prepares and displays the same variant element, retaining it on a resize within the same bound', async () => {
+    await resizeViewport(1000, 700);
+    const playlist = variantPlaylist();
+    const preload = createPreloadTracker();
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={{ getPlaylist: async () => playlist }}
+        preloadImage={preload.preloadImage}
+      />,
+    );
+    await flushPromises();
+    const source = `${mediaUrl(ids.first)}/display/v1/1280`;
+    const prepared = document.querySelector<HTMLImageElement>(
+      'img[data-state="prepared"]',
+    )!;
+    expect(prepared.src).toBe(source);
+    expect(preload.callsFor(source)).toBe(1);
+    await act(async () => preload.resolve(source));
+    expect(currentImage()).toBe(prepared);
+    await resizeViewport(1100, 700);
+    expect(currentImage()).toBe(prepared);
+    expect(preload.callsFor(source)).toBe(1);
+    expect(preload.callsFor(mediaUrl(ids.first))).toBe(0);
+  });
+  it('keeps the current image until a larger viewport or DPR source is ready', async () => {
+    await resizeViewport(1000, 700);
+    const preload = createPreloadTracker();
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={{ getPlaylist: async () => variantPlaylist() }}
+        preloadImage={preload.preloadImage}
+      />,
+    );
+    await flushPromises();
+    await act(async () =>
+      preload.resolve(`${mediaUrl(ids.first)}/display/v1/1280`),
+    );
+    const original = currentImage();
+    await resizeViewport(1800, 1200);
+    expect(currentImage()).toBe(original);
+    const larger = `${mediaUrl(ids.first)}/display/v1/1920`;
+    expect(preload.callsFor(larger)).toBe(1);
+    await act(async () => preload.resolve(larger));
+    expect(currentImage().src).toBe(larger);
+    // Rotating changes contain geometry and returns to the smaller variant.
+    await resizeViewport(700, 1100);
+    await act(async () =>
+      preload.resolve(`${mediaUrl(ids.first)}/display/v1/1280`),
+    );
+    expect(currentImage().src).toContain('/1280');
+    const ratio = window.devicePixelRatio;
+    try {
+      window.devicePixelRatio = 2;
+      await resizeViewport(700, 1100);
+      const retina = `${mediaUrl(ids.first)}/display/v1/1920`;
+      await act(async () => preload.resolve(retina));
+      expect(currentImage().src).toBe(retina);
+    } finally {
+      window.devicePixelRatio = ratio;
+    }
+  });
+  it('prepares a new source when cover needs more pixels than contain', async () => {
+    await resizeViewport(1600, 1000);
+    let playlist = variantPlaylist();
+    playlist.items[0]!.width = 4000;
+    playlist.items[0]!.height = 3000;
+    playlist.items[0]!.variants = [
+      { contentUrl: '/small', width: 1400, height: 1050 },
+      { contentUrl: '/large', width: 1920, height: 1440 },
+    ];
+    const preload = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={{ getPlaylist: async () => playlist }}
+        preloadImage={preload}
+        refreshIntervalMs={20}
+      />,
+    );
+    await waitFor(() =>
+      expect(currentImage().src).toBe('http://gallery.test/small'),
+    );
+    playlist = {
+      ...playlist,
+      settings: { ...playlist.settings, imageFit: 'auto' },
+    };
+    await waitFor(() =>
+      expect(currentImage().src).toBe('http://gallery.test/large'),
+    );
+    expect(currentImage()).toHaveClass('gallery__image--cover');
+  });
+  it('falls back to the full source on variant decode failure', async () => {
+    await resizeViewport(1000, 700);
+    const preload = vi.fn(async (url: string) => {
+      if (url.includes('/display/')) throw new Error('broken variant');
+    });
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={{ getPlaylist: async () => variantPlaylist() }}
+        preloadImage={preload}
+      />,
+    );
+    await waitFor(() => expect(currentImage().src).toBe(mediaUrl(ids.first)));
+    expect(preload.mock.calls.map(([url]) => url)).toEqual([
+      `${mediaUrl(ids.first)}/display/v1/1280`,
+      mediaUrl(ids.first),
+    ]);
+  });
+});

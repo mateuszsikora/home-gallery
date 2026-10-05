@@ -481,3 +481,43 @@ describe('createHomeGalleryClient', () => {
     ).toThrow('either a bearer token or an administration session');
   });
 });
+
+describe('playlist display variants compatibility', () => {
+  it.each([false, true])(
+    'preserves optional variants (present: %s)',
+    async (present) => {
+      const item = {
+        id: mediaId,
+        contentUrl: `/media/${mediaId}`,
+        mimeType: 'image/webp',
+        width: 6000,
+        height: 4000,
+        ...(present
+          ? {
+              variants: [
+                {
+                  contentUrl: `/media/${mediaId}/display/v1/1280`,
+                  width: 1280,
+                  height: 853,
+                },
+              ],
+            }
+          : {}),
+      };
+      const client = createHomeGalleryClient({
+        baseUrl: 'https://gallery.example.test',
+        fetch: async () =>
+          jsonResponse({
+            items: [item],
+            settings: {
+              slideDurationMs: 8000,
+              fadeDurationMs: 1000,
+              playbackMode: 'sequential',
+              imageFit: 'contain',
+            },
+          }),
+      });
+      expect((await client.getPlaylist()).items).toEqual([item]);
+    },
+  );
+});

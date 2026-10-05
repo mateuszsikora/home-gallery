@@ -12,6 +12,8 @@ export const API_ROUTES = {
   telegramContributors: '/api/telegram/contributors',
   mediaById: (id: string): string => `/api/media/${encodeURIComponent(id)}`,
   mediaContentById: (id: string): string => `/media/${encodeURIComponent(id)}`,
+  mediaDisplayVariantById: (id: string, edge: number): string =>
+    `/media/${encodeURIComponent(id)}/display/v1/${edge}`,
   adminMediaContentById: (id: string): string =>
     `/api/media/${encodeURIComponent(id)}/content`,
   adminMediaThumbnailById: (id: string): string =>

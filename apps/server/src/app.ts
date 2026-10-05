@@ -44,6 +44,10 @@ import { FixedWindowRateLimiter } from './http/rate-limit.js';
 import { registerSettingsRoutes } from './http/settings-routes.js';
 import { registerTelegramContributorRoutes } from './http/telegram-contributor-routes.js';
 import {
+  startDisplayVariantWorker,
+  type DisplayVariantWorker,
+} from './media/display-variant-worker.js';
+import {
   startThumbnailBackfill,
   type ThumbnailBackfill,
 } from './media/thumbnail-backfill.js';
@@ -62,6 +66,7 @@ declare module 'fastify' {
     mediaStorage: MediaStorage;
     /** The background pass that gives older media its preview derivative. */
     thumbnailBackfill: ThumbnailBackfill;
+    displayVariantWorker: DisplayVariantWorker;
   }
 }
 
@@ -236,13 +241,22 @@ export const createApp = async (
       mediaStorage: storage,
     });
     app.decorate('thumbnailBackfill', thumbnailBackfill);
+    const displayVariantWorker = startDisplayVariantWorker({
+      log: app.log,
+      mediaRepository: app.mediaRepository,
+      mediaStorage: storage,
+    });
+    app.decorate('displayVariantWorker', displayVariantWorker);
 
     // The backfill reads the database, so it has to stop before the connection
     // closes; that is why closing the connection lives in this hook. `stop`
     // bounds its own wait, so a downscale in flight cannot spend the shutdown
     // budget — it promises to read nothing once it resolves, finished or not.
     app.addHook('onClose', async () => {
-      await thumbnailBackfill.stop();
+      await Promise.all([
+        thumbnailBackfill.stop(),
+        displayVariantWorker.stop(),
+      ]);
       database.close();
     });
 
