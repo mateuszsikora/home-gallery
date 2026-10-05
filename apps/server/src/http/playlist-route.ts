@@ -5,6 +5,7 @@ import {
 } from '@home-gallery/shared-types';
 import type { FastifyInstance } from 'fastify';
 
+import { availableDisplayVariants } from '../media/display-variants.js';
 import { NO_STORE_CACHE_CONTROL } from './cache.js';
 
 /**
@@ -15,8 +16,18 @@ import { NO_STORE_CACHE_CONTROL } from './cache.js';
  */
 export const registerPlaylistRoute = (app: FastifyInstance): void => {
   app.get(API_ROUTES.playlist, async (request, reply) => {
+    const items = [];
+    for (const record of app.mediaRepository.listEnabled()) {
+      const variants = await availableDisplayVariants(record, app.mediaStorage);
+      // Visibility may change while reading the filesystem.
+      if (app.mediaRepository.findById(record.id)?.enabled !== true) continue;
+      items.push({
+        ...toPlaylistItem(record),
+        ...(variants.length > 0 ? { variants } : {}),
+      });
+    }
     const playlist: PlaylistResponse = {
-      items: app.mediaRepository.listEnabled().map(toPlaylistItem),
+      items,
       settings: app.settingsRepository.read(),
     };
 

@@ -184,7 +184,7 @@ The complete authorization, input, dependency, recovery, and MVP review is recor
 The `home-gallery-data` Compose volume contains all state:
 
 - `home-gallery.db` plus SQLite WAL files;
-- normalized WebP media;
+- normalized WebP media, administration thumbnails, and display variants;
 - temporary upload files while a request is in progress.
 
 The server container runs as UID/GID `1000`, has a read-only root filesystem, and can write only its data volume and temporary filesystem. The bot also runs as a non-root user. Web containers use unprivileged nginx on port `8080` inside the network.
@@ -269,6 +269,10 @@ bash deploy.sh
 Always take a backup before upgrading. A future release may include a database migration that older application code cannot read. In that case, restore the backup made immediately before the upgrade as well as pinning the older image tag.
 
 The first start after upgrading past the release that introduced administration previews generates a preview derivative for every photograph already stored. The pass runs in the background, one photograph at a time, so the server answers requests throughout it and logs `Administration thumbnail backfill finished` when it is done. Until a photograph has its derivative, its administration card loads the full image as before. An interrupted pass resumes on the next start. Ten failures in a row — a full volume, an unwritable media directory — abandon the pass with `Giving up on administration thumbnails after repeated failures` rather than logging one line per photograph; fix the storage and restart.
+
+Display images use a separate background worker, with one encode at a time for both startup backfill and newly uploaded photos. It generates up to three derivatives per photograph, with longest edges of 1280, 1920, and 2560 pixels; bounds equal to or larger than the source are skipped. The full-resolution normalized image is retained. Startup snapshots the library, each missing size is attempted once, and completed files are reused. An encoding/storage failure stops work on that photograph; ten consecutive failed photographs suspend generation until restart. Fix storage errors before restarting. Upload acceptance and playback do not depend on generation success, and no request triggers resizing.
+
+Files named `<id>.display-v1-<edge>.webp` live alongside the normalized images in `media/`. Backup and restore already archive that complete directory, including these files. Deleting a media item removes its variants; a concurrent encode checks for deletion before and after publication. Missing derivatives are regenerated on restart without re-uploading. To reclaim derivative storage, stop the server before removing only `*.display-v1-*.webp`; startup will recreate them. Do not modify variant bytes in place: the URL and immutable ETag identify the v1 recipe, which future recipe changes must version. Failed deletion is logged for operator cleanup. Capacity planning must include up to three additional WebP files per photo (at most about 11.9 million extra pixels for a square source, fewer for other aspect ratios); actual compressed bytes depend on content. See [policy and measurements](DISPLAY_VARIANTS.md).
 
 ## Continuous integration
 

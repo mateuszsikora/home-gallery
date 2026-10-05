@@ -279,6 +279,7 @@ export const registerMediaUploadRoute = (app: FastifyInstance): void => {
           throw error;
         }
 
+        app.displayVariantWorker.enqueue(record);
         return await reply.status(201).send(record);
       } finally {
         reservedUploads -= 1;

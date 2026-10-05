@@ -1,5 +1,6 @@
 import {
   API_ROUTES,
+  DISPLAY_VARIANT_EDGES,
   mediaIdSchema,
   mediaListQuerySchema,
   mediaUpdateInputSchema,
@@ -11,6 +12,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 
 import { InvalidCursorError } from '../database/media-repository.js';
+import { displayVariantFilename } from '../media/display-variants.js';
 import { thumbnailFilename } from '../media/thumbnails.js';
 import { NO_STORE_CACHE_CONTROL } from './cache.js';
 import { ApiError } from './errors.js';
@@ -177,6 +179,19 @@ export const registerMediaRoutes = (app: FastifyInstance): void => {
           { err: error, mediaId: record.id },
           'Deleted media left its administration thumbnail behind',
         );
+      }
+
+      for (const edge of DISPLAY_VARIANT_EDGES) {
+        try {
+          await app.mediaStorage.remove(
+            displayVariantFilename(record.storedFilename, edge),
+          );
+        } catch (error) {
+          request.log.warn(
+            { err: error, mediaId: record.id },
+            'Could not remove a display variant',
+          );
+        }
       }
 
       return reply

@@ -155,6 +155,28 @@ describe('POST /api/media', () => {
     expect(app.mediaRepository.count()).toBe(0);
   };
 
+  it('queues display variants after a successful upload', async () => {
+    const bytes = await sharp({
+      create: { width: 1600, height: 1200, channels: 3, background: '#5284a2' },
+    })
+      .jpeg()
+      .toBuffer();
+    const response = await upload(validFields(), { bytes });
+    expect(response.statusCode).toBe(201);
+    await app.displayVariantWorker.finished;
+    const playlist = (await app.inject(API_ROUTES.playlist)).json();
+    expect(playlist.items[0].variants).toEqual([
+      {
+        contentUrl: API_ROUTES.mediaDisplayVariantById(
+          response.json().id,
+          1280,
+        ),
+        width: 1280,
+        height: 960,
+      },
+    ]);
+  });
+
   it('stores a verified image as normalized WebP and returns its metadata', async () => {
     const response = await upload(validFields(), {
       bytes: await createImage('png'),

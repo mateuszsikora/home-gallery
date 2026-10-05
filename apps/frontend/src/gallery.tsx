@@ -14,6 +14,8 @@ import type {
   PlaylistResponse,
 } from '@home-gallery/shared-types';
 
+import { selectImageSource, type Viewport } from './image-source.js';
+
 export type PlaylistClient = Pick<HomeGalleryClient, 'getPlaylist'>;
 
 export interface PlaybackState {
@@ -236,29 +238,37 @@ export const resolveSlideLayout = (
   return fit === 'auto' && loss <= AUTO_COVER_LOSS_LIMIT ? 'cover' : 'blurred';
 };
 
-const readViewportAspect = (): number => {
-  const { innerHeight, innerWidth } = window;
+const readViewport = (): Viewport => ({
+  width: Math.max(1, window.innerWidth),
+  height: Math.max(1, window.innerHeight),
+  pixelRatio: window.devicePixelRatio > 0 ? window.devicePixelRatio : 1,
+});
 
-  return innerHeight > 0 ? innerWidth / innerHeight : 1;
-};
-
-const useViewportAspect = (): number => {
-  const [aspect, setAspect] = useState(readViewportAspect);
-
+const useViewport = (): Viewport => {
+  const [viewport, setViewport] = useState(readViewport);
   useEffect(() => {
+    let density: MediaQueryList | undefined;
     const update = (): void => {
-      setAspect(readViewportAspect());
+      const next = readViewport();
+      setViewport((previous) =>
+        previous.width === next.width &&
+        previous.height === next.height &&
+        previous.pixelRatio === next.pixelRatio
+          ? previous
+          : next,
+      );
+      density?.removeEventListener('change', update);
+      density = window.matchMedia?.(`(resolution: ${next.pixelRatio}dppx)`);
+      density?.addEventListener('change', update);
     };
-
     update();
     window.addEventListener('resize', update);
-
     return () => {
       window.removeEventListener('resize', update);
+      density?.removeEventListener('change', update);
     };
   }, []);
-
-  return aspect;
+  return viewport;
 };
 
 interface LoadedSlide {
@@ -332,7 +342,11 @@ export const Gallery = ({
 }: GalleryProps): ReactElement => {
   const [playlist, setPlaylist] = useState<PlaylistResponse>();
   const [connectionFailed, setConnectionFailed] = useState(false);
-  const viewportAspect = useViewportAspect();
+  const viewport = useViewport();
+  const viewportAspect = viewport.width / viewport.height;
+  const [failedSources, setFailedSources] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const [currentSlide, setCurrentSlide] = useState<PreparedSlide>();
   const [previousSlide, setPreviousSlide] = useState<PreparedSlide>();
   const displayed = useRef<PreparedSlide | undefined>(undefined);
@@ -404,6 +418,38 @@ export const Gallery = ({
   const items = playlist?.items;
   const mode = playlist?.settings.playbackMode;
   const slideDurationMs = playlist?.settings.slideDurationMs;
+  // A stable value prevents layout/viewport changes that select the same bytes
+  // from restarting preparation or the display deadline.
+  const selectedSources = JSON.stringify(
+    (items ?? []).map((item) => {
+      const layout = resolveSlideLayout(
+        playlist!.settings.imageFit,
+        item,
+        viewportAspect,
+      );
+      const selected = selectImageSource(item, layout, viewport);
+      return [
+        item.id,
+        resolveContentUrl(
+          failedSources.has(selected) ? item.contentUrl : selected,
+          apiBaseUrl,
+        ),
+      ];
+    }),
+  );
+  useEffect(() => {
+    const available = new Set(
+      items?.flatMap(
+        (item) => item.variants?.map(({ contentUrl }) => contentUrl) ?? [],
+      ),
+    );
+    setFailedSources((previous) => {
+      const retained = new Set(
+        [...previous].filter((source) => available.has(source)),
+      );
+      return retained.size === previous.size ? previous : retained;
+    });
+  }, [items]);
 
   useEffect(() => {
     if (
@@ -440,9 +486,10 @@ export const Gallery = ({
       startSlideDuration();
     }
 
+    const sourcesById = new Map<string, string>(JSON.parse(selectedSources));
     const ordered = playback.current.order.map((id) => {
       const item = items.find((candidate) => candidate.id === id)!;
-      return { item, source: resolveContentUrl(item.contentUrl, apiBaseUrl) };
+      return { item, source: sourcesById.get(id)! };
     });
     const sources = new Set(ordered.map(({ source }) => source));
     for (const source of preloadTimeouts.current.keys()) {
@@ -480,7 +527,7 @@ export const Gallery = ({
       const controller = new AbortController();
       const timeoutMs =
         preloadTimeouts.current.get(slide.source) ?? PRELOAD_TIMEOUT_MS;
-      let finish: (ready: boolean) => void = () => {};
+      let finish: (ready: boolean, failedSource?: boolean) => void = () => {};
       const result = new Promise<boolean>((resolve) => {
         let settled = false;
         const timer = window.setTimeout(() => {
@@ -490,12 +537,22 @@ export const Gallery = ({
             slide.source,
             Math.min(timeoutMs * 2, MAX_PRELOAD_TIMEOUT_MS),
           );
-          finish(false);
+          finish(false, true);
         }, timeoutMs);
-        finish = (ready) => {
+        finish = (ready, failedSource = false) => {
           if (settled) return;
           settled = true;
           window.clearTimeout(timer);
+          if (failedSource) {
+            const variant = slide.item.variants?.find(
+              ({ contentUrl }) =>
+                resolveContentUrl(contentUrl, apiBaseUrl) === slide.source,
+            );
+            if (variant !== undefined)
+              setFailedSources(
+                (previous) => new Set([...previous, variant.contentUrl]),
+              );
+          }
           if (ready) preloadTimeouts.current.delete(slide.source);
           else {
             controller.abort();
@@ -527,7 +584,7 @@ export const Gallery = ({
                 if (!mounted.signal.aborted) finish(true);
               },
               () => {
-                if (!mounted.signal.aborted) finish(false);
+                if (!mounted.signal.aborted) finish(false, true);
               },
             );
           return () => {
@@ -566,8 +623,13 @@ export const Gallery = ({
           slide.item.id === displayed.current?.item.id &&
           slide.source === displayed.current.source,
       );
+      const changedIndex = ordered.findIndex(
+        (slide) => slide.item.id === displayed.current?.item.id,
+      );
       return currentIndex < 0
-        ? ordered
+        ? changedIndex < 0
+          ? ordered
+          : [...ordered.slice(changedIndex), ...ordered.slice(0, changedIndex)]
         : [
             ...ordered.slice(currentIndex + 1),
             ...ordered.slice(0, currentIndex),
@@ -634,7 +696,15 @@ export const Gallery = ({
       requests.clear();
       setPreparedSlides([]);
     };
-  }, [apiBaseUrl, items, mode, preloadImage, random, slideDurationMs]);
+  }, [
+    apiBaseUrl,
+    items,
+    mode,
+    preloadImage,
+    random,
+    slideDurationMs,
+    selectedSources,
+  ]);
 
   useEffect(() => {
     if (previousSlide === undefined) return;

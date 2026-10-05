@@ -1,5 +1,6 @@
 import {
   API_ROUTES,
+  DISPLAY_VARIANT_EDGES,
   mediaIdSchema,
   type MediaRecord,
 } from '@home-gallery/shared-types';
@@ -11,6 +12,7 @@ import {
   PRIVATE_REVALIDATE_CACHE_CONTROL,
 } from './cache.js';
 import { ApiError } from './errors.js';
+import { displayVariantFilename } from '../media/display-variants.js';
 import { thumbnailFilename } from '../media/thumbnails.js';
 import type { OpenMediaFile } from '../storage/media-storage.js';
 
@@ -119,6 +121,54 @@ export const registerMediaContentRoute = (app: FastifyInstance): void => {
         return reply.status(304).send();
       }
 
+      return reply
+        .header('content-length', file.size)
+        .type(record.mimeType)
+        .send(file.stream);
+    },
+  );
+  app.get<{ Params: { id: string; edge: string } }>(
+    '/media/:id/display/v1/:edge',
+    async (request, reply) => {
+      const record = requireRecord(app, request, false);
+      if (
+        !DISPLAY_VARIANT_EDGES.some(
+          (edge) => String(edge) === request.params.edge,
+        )
+      )
+        throw unavailable();
+      let derivative: OpenMediaFile | undefined;
+      try {
+        derivative = await app.mediaStorage.openForRead(
+          displayVariantFilename(
+            record.storedFilename,
+            Number(request.params.edge),
+          ),
+        );
+      } catch (error) {
+        request.log.warn(
+          { err: error, mediaId: record.id },
+          'Display variant unavailable; serving full-size media',
+        );
+      }
+      const file = derivative ?? (await openStoredImage(app, request, record));
+      // A fallback must never poison the immutable derivative URL in caches.
+      const etag =
+        derivative === undefined
+          ? `"${record.id}"`
+          : `"${record.id}-display-v1-${request.params.edge}"`;
+      reply
+        .header(
+          'cache-control',
+          derivative === undefined
+            ? NO_STORE_CACHE_CONTROL
+            : IMMUTABLE_CACHE_CONTROL,
+        )
+        .header('etag', etag);
+      if (revalidates(request, etag)) {
+        file.stream.destroy();
+        return reply.status(304).send();
+      }
       return reply
         .header('content-length', file.size)
         .type(record.mimeType)
