@@ -29,6 +29,8 @@ npm run test:tls-config
 npm run test:compose
 ```
 
+Gallery preparation and browser-specific evidence for issue #71 are recorded in [Gallery image preparation validation](GALLERY_PREPARATION_VALIDATION.md).
+
 ## Security review
 
 | Area               | Evidence and result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
