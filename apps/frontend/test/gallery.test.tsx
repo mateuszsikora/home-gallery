@@ -517,6 +517,107 @@ const controlledPreloader = () => {
   return { preloadImage, requests, resolve };
 };
 
+describe('Gallery slide deadlines', () => {
+  beforeEach(() => vi.useFakeTimers());
+
+  it.each([
+    {
+      name: 'one appended photo at the default poll interval',
+      interval: 30_000,
+      additions: 1,
+    },
+    { name: 'repeated playlist additions', interval: 10_000, additions: 5 },
+  ])(
+    'preserves the original deadline after $name',
+    async ({ interval, additions }) => {
+      let playlist = createPlaylist([ids.first, ids.second], {
+        slideDurationMs: 60_000,
+      });
+      const client = { getPlaylist: vi.fn(async () => playlist) };
+      const preloadImage = vi.fn();
+      render(
+        <Gallery
+          apiBaseUrl="http://gallery.test"
+          client={client}
+          preloadImage={preloadImage}
+          refreshIntervalMs={interval}
+        />,
+      );
+      await flushPromises();
+      const first = currentImage();
+
+      for (let index = 0; index < additions; index += 1) {
+        const addedId = `00000000-0000-4000-8000-${String(index + 3).padStart(12, '0')}`;
+        playlist = createPlaylist(
+          [...playlist.items.map(({ id }) => id), addedId],
+          playlist.settings,
+        );
+        await advanceTime(interval);
+        expect(currentImage()).toBe(first);
+      }
+
+      await advanceTime(60_000 - interval * additions - 1);
+      expect(currentImage()).toBe(first);
+      await advanceTime(1);
+      expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.second));
+      expect(renderedImages()[1]).toBe(first);
+      await advanceTime(800);
+      expect(renderedImages()).toHaveLength(1);
+    },
+  );
+
+  it('starts a new duration when the slide timing setting changes', async () => {
+    let playlist = createPlaylist([ids.first, ids.second], {
+      slideDurationMs: 60_000,
+    });
+    const client = { getPlaylist: vi.fn(async () => playlist) };
+    const preloadImage = vi.fn();
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={client}
+        preloadImage={preloadImage}
+      />,
+    );
+    await flushPromises();
+    playlist = createPlaylist([ids.first, ids.second], {
+      slideDurationMs: 20_000,
+    });
+    await advanceTime(30_000);
+    await advanceTime(19_999);
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.first));
+    await advanceTime(1);
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.second));
+  });
+
+  it('does not renew an expired deadline when a usable candidate is added', async () => {
+    let playlist = createPlaylist([ids.first, ids.second], {
+      slideDurationMs: 60_000,
+    });
+    const client = { getPlaylist: vi.fn(async () => playlist) };
+    const preloadImage = vi.fn(async (url: string) => {
+      if (url === mediaUrl(ids.second)) throw new Error('unavailable');
+    });
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={client}
+        preloadImage={preloadImage}
+        refreshIntervalMs={1_000}
+      />,
+    );
+    await flushPromises();
+    await advanceTime(61_000);
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.first));
+    playlist = createPlaylist(
+      [ids.first, ids.second, ids.third],
+      playlist.settings,
+    );
+    await advanceTime(1_000);
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.third));
+  });
+});
+
 describe('Gallery image failure recovery', () => {
   beforeEach(() => vi.useFakeTimers());
 

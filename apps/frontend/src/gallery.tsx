@@ -287,6 +287,13 @@ export const Gallery = ({
   const [currentSlide, setCurrentSlide] = useState<LoadedSlide>();
   const [previousSlide, setPreviousSlide] = useState<LoadedSlide>();
   const displayed = useRef<LoadedSlide | undefined>(undefined);
+  const slideTiming = useRef<
+    | {
+        deadline: number;
+        durationMs: number;
+      }
+    | undefined
+  >(undefined);
   const playback = useRef<PlaybackState>({
     currentId: undefined,
     mode: 'sequential',
@@ -356,9 +363,25 @@ export const Gallery = ({
     playback.current = reconcilePlayback(playback.current, items, mode, random);
     if (items.length === 0) {
       displayed.current = undefined;
+      slideTiming.current = undefined;
       setCurrentSlide(undefined);
       setPreviousSlide(undefined);
       return;
+    }
+
+    const startSlideDuration = (): void => {
+      slideTiming.current = {
+        deadline: performance.now() + slideDurationMs,
+        durationMs: slideDurationMs,
+      };
+    };
+    // Only a new photo or a changed duration starts a new display deadline.
+    // Rebuilding candidate requests must not postpone an unchanged slide.
+    if (
+      displayed.current !== undefined &&
+      slideTiming.current?.durationMs !== slideDurationMs
+    ) {
+      startSlideDuration();
     }
 
     const ordered = playback.current.order.map((id) => {
@@ -383,6 +406,11 @@ export const Gallery = ({
           resolve();
         };
       });
+    const waitForSlideDeadline = async (): Promise<void> => {
+      const remainingMs =
+        (slideTiming.current?.deadline ?? 0) - performance.now();
+      if (remainingMs > 0) await delay(remainingMs);
+    };
     const request = (slide: LoadedSlide): Promise<boolean> => {
       const existing = requests.get(slide);
       if (existing !== undefined) return existing.result;
@@ -442,12 +470,12 @@ export const Gallery = ({
 
     const run = async (): Promise<void> => {
       let candidates = candidatesAfterCurrent();
-      // A retained photo gets its normal display time after a settings change.
+      // A retained photo waits only for the remainder of its display time.
       // A removed/replaced photo stays visible only until a replacement is ready.
       if (candidates.length < ordered.length) {
         prepare(candidates);
         if (candidates.length === 0) return;
-        await delay(slideDurationMs);
+        await waitForSlideDeadline();
       }
       while (!disposed) {
         let advanced = false;
@@ -464,6 +492,7 @@ export const Gallery = ({
 
           setPreviousSlide(displayed.current);
           displayed.current = candidate;
+          startSlideDuration();
           setCurrentSlide(candidate);
           playback.current = {
             ...playback.current,
@@ -477,7 +506,7 @@ export const Gallery = ({
           candidates = candidatesAfterCurrent();
           prepare(candidates);
           if (candidates.length === 0) return;
-          await delay(slideDurationMs);
+          await waitForSlideDeadline();
         } else {
           // Even synchronous failures get a full pause before another pass.
           // At most PRELOAD_AHEAD requests can be alive at any time.
