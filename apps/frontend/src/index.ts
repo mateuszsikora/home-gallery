@@ -6,4 +6,5 @@ export {
   type PlaylistClient,
   type PlaybackState,
   type PreloadImage,
+  type SlideImages,
 } from './gallery.js';

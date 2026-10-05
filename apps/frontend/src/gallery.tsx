@@ -22,15 +22,21 @@ export interface PlaybackState {
   readonly order: readonly string[];
 }
 
+/** Elements owned by React and retained from preparation through display. */
+export interface SlideImages {
+  readonly image: HTMLImageElement;
+  readonly backdrop: HTMLImageElement;
+}
+
 /**
- * Fetches a photo ahead of its turn. The returned promise settles once the
- * photo is decoded and can be painted in the frame it is attached to the page,
- * which is what lets the slideshow hold a slide instead of cutting to an empty
- * frame. Implementations should release pending work when the signal aborts.
+ * Prepare the supplied elements for this source. Readiness applies to these
+ * elements, not to indefinite retention of decoded data by the browser.
+ * Implementations must release pending work when the signal aborts.
  */
 export type PreloadImage = (
   url: string,
-  signal?: AbortSignal,
+  signal: AbortSignal,
+  images: SlideImages,
 ) => Promise<void> | void;
 
 export interface GalleryProps {
@@ -68,44 +74,55 @@ const ASPECT_MATCH_TOLERANCE = 0.01;
  */
 const AUTO_COVER_LOSS_LIMIT = 0.3;
 
-const defaultPreloadImage: PreloadImage = (url, signal) =>
+const prepareImage = (
+  image: HTMLImageElement,
+  source: string,
+  signal: AbortSignal,
+): Promise<void> =>
   new Promise<void>((resolve, reject) => {
-    const image = new Image();
     let settled = false;
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
-      image.onload = null;
-      image.onerror = null;
-      signal?.removeEventListener('abort', abort);
-      if (error !== undefined) {
-        image.removeAttribute('src');
-        reject(error);
-      } else {
-        resolve();
-      }
+      image.removeEventListener('load', loaded);
+      image.removeEventListener('error', failed);
+      signal.removeEventListener('abort', abort);
+      if (error !== undefined) reject(error);
+      else if (
+        image.src !== source ||
+        (image.currentSrc && image.currentSrc !== source)
+      ) {
+        reject(new Error('Image source changed during preparation'));
+      } else resolve();
     };
-    const abort = (): void => finish(new Error('Image preload cancelled'));
-    signal?.addEventListener('abort', abort, { once: true });
-    if (signal?.aborted) {
+    const loaded = (): void => finish();
+    const failed = (): void => finish(new Error('Image preparation failed'));
+    const abort = (): void => finish(new Error('Image preparation cancelled'));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) {
       abort();
       return;
     }
-
-    image.decoding = 'async';
-    image.onerror = () => finish(new Error('Image preload failed'));
-    // Older WebViews without decode still have to finish loading the image.
-    if (typeof image.decode !== 'function') {
-      image.onload = () => finish();
-      image.src = url;
+    image.addEventListener('error', failed);
+    if (typeof image.decode === 'function') {
+      void image.decode().then(loaded, failed);
+    } else if (image.complete) {
+      if (image.naturalWidth > 0) loaded();
+      else failed();
     } else {
-      image.src = url;
-      void image.decode().then(
-        () => finish(),
-        () => finish(new Error('Image decode failed')),
-      );
+      // Older WebViews without decode still have to finish loading the image.
+      image.addEventListener('load', loaded);
     }
   });
+
+const defaultPreloadImage: PreloadImage = async (source, signal, images) => {
+  // Prepare both layers even in contain/cover mode. A resize or fit change can
+  // then reveal the same ready backdrop without replacing either image.
+  await Promise.all([
+    prepareImage(images.image, source, signal),
+    prepareImage(images.backdrop, source, signal),
+  ]);
+};
 
 const arraysEqual = (
   left: readonly string[],
@@ -249,27 +266,58 @@ interface LoadedSlide {
   readonly source: string;
 }
 
-const slideElement = (
-  { item, source }: LoadedSlide,
-  state: 'current' | 'previous',
-  layout: SlideLayout,
-): ReactElement => {
+interface PreparedSlide extends LoadedSlide {
+  readonly key: number;
+  readonly prepare: (images: SlideImages) => () => void;
+}
+
+const Slide = ({
+  slide,
+  state,
+  layout,
+}: {
+  readonly slide: PreparedSlide;
+  readonly state: 'current' | 'previous' | 'prepared';
+  readonly layout: SlideLayout;
+}): ReactElement => {
+  const image = useRef<HTMLImageElement>(null);
+  const backdrop = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const images = { image: image.current!, backdrop: backdrop.current! };
+    for (const element of Object.values(images)) {
+      if (element.src !== slide.source) element.src = slide.source;
+    }
+    const cancel = slide.prepare(images);
+    return () => {
+      cancel();
+      for (const element of Object.values(images))
+        element.removeAttribute('src');
+    };
+  }, [slide]);
+
   return (
     <div
+      aria-hidden={state === 'prepared' ? true : undefined}
       className={`gallery__slide gallery__slide--${state}`}
-      key={`${item.id}:${source}`}
     >
-      {layout === 'blurred' ? (
-        <img alt="" aria-hidden className="gallery__backdrop" src={source} />
-      ) : null}
       <img
+        ref={backdrop}
+        alt=""
+        aria-hidden
+        className="gallery__backdrop"
+        hidden={layout !== 'blurred'}
+        decoding="async"
+        src={slide.source}
+      />
+      <img
+        ref={image}
         alt=""
         className={`gallery__image gallery__image--${layout}`}
         data-state={state}
         decoding="async"
-        height={item.height}
-        src={source}
-        width={item.width}
+        height={slide.item.height}
+        src={slide.source}
+        width={slide.item.width}
       />
     </div>
   );
@@ -285,9 +333,13 @@ export const Gallery = ({
   const [playlist, setPlaylist] = useState<PlaylistResponse>();
   const [connectionFailed, setConnectionFailed] = useState(false);
   const viewportAspect = useViewportAspect();
-  const [currentSlide, setCurrentSlide] = useState<LoadedSlide>();
-  const [previousSlide, setPreviousSlide] = useState<LoadedSlide>();
-  const displayed = useRef<LoadedSlide | undefined>(undefined);
+  const [currentSlide, setCurrentSlide] = useState<PreparedSlide>();
+  const [previousSlide, setPreviousSlide] = useState<PreparedSlide>();
+  const displayed = useRef<PreparedSlide | undefined>(undefined);
+  const [preparedSlides, setPreparedSlides] = useState<
+    readonly PreparedSlide[]
+  >([]);
+  const nextSlideKey = useRef(0);
   const preloadTimeouts = useRef(new Map<string, number>());
   const slideTiming = useRef<
     | {
@@ -369,6 +421,7 @@ export const Gallery = ({
       preloadTimeouts.current.clear();
       setCurrentSlide(undefined);
       setPreviousSlide(undefined);
+      setPreparedSlides([]);
       return;
     }
 
@@ -400,6 +453,8 @@ export const Gallery = ({
     const requests = new Map<
       LoadedSlide,
       {
+        slide: PreparedSlide;
+        failed: boolean;
         result: Promise<boolean>;
         cancel: () => void;
       }
@@ -442,21 +497,51 @@ export const Gallery = ({
           settled = true;
           window.clearTimeout(timer);
           if (ready) preloadTimeouts.current.delete(slide.source);
-          else controller.abort();
+          else {
+            controller.abort();
+            const failed = requests.get(slide);
+            if (failed !== undefined) failed.failed = true;
+            setPreparedSlides((slides) =>
+              slides.filter((candidate) => candidate !== failed?.slide),
+            );
+          }
           resolve(ready);
         };
       });
-      requests.set(slide, { result, cancel: () => finish(false) });
-      // Catch both synchronous preloader errors and asynchronous decode failures.
-      void Promise.resolve()
-        .then(() => {
-          if (disposed || controller.signal.aborted) return;
-          return preloadImage(slide.source, controller.signal);
-        })
-        .then(
-          () => finish(true),
-          () => finish(false),
-        );
+      const prepared: PreparedSlide = {
+        ...slide,
+        key: nextSlideKey.current++,
+        prepare: (images) => {
+          const mounted = new AbortController();
+          const abort = (): void => mounted.abort();
+          controller.signal.addEventListener('abort', abort, { once: true });
+          if (controller.signal.aborted) abort();
+          // Each effect lifetime owns its listeners, including StrictMode replay.
+          void Promise.resolve()
+            .then(() => {
+              if (disposed || mounted.signal.aborted) return;
+              return preloadImage(slide.source, mounted.signal, images);
+            })
+            .then(
+              () => {
+                if (!mounted.signal.aborted) finish(true);
+              },
+              () => {
+                if (!mounted.signal.aborted) finish(false);
+              },
+            );
+          return () => {
+            controller.signal.removeEventListener('abort', abort);
+            abort();
+          };
+        },
+      };
+      requests.set(slide, {
+        slide: prepared,
+        failed: false,
+        result,
+        cancel: () => finish(false),
+      });
       return result;
     };
     const prepare = (candidates: readonly LoadedSlide[]): void => {
@@ -468,6 +553,12 @@ export const Gallery = ({
         }
       }
       for (const slide of upcoming) void request(slide);
+      setPreparedSlides(
+        upcoming.flatMap((slide) => {
+          const request = requests.get(slide)!;
+          return request.failed ? [] : [request.slide];
+        }),
+      );
     };
     const candidatesAfterCurrent = (): LoadedSlide[] => {
       const currentIndex = ordered.findIndex(
@@ -506,9 +597,10 @@ export const Gallery = ({
           if (!ready) continue;
 
           setPreviousSlide(displayed.current);
-          displayed.current = candidate;
+          const prepared = requests.get(candidate)!.slide;
+          displayed.current = prepared;
           startSlideDuration();
-          setCurrentSlide(candidate);
+          setCurrentSlide(prepared);
           playback.current = {
             ...playback.current,
             currentId: candidate.item.id,
@@ -527,6 +619,7 @@ export const Gallery = ({
           // At most PRELOAD_AHEAD requests can be alive at any time.
           for (const pending of requests.values()) pending.cancel();
           requests.clear();
+          setPreparedSlides([]);
           await delay(RETRY_DELAY_MS);
           candidates = candidatesAfterCurrent();
         }
@@ -539,6 +632,7 @@ export const Gallery = ({
       cancelDelay?.();
       for (const pending of requests.values()) pending.cancel();
       requests.clear();
+      setPreparedSlides([]);
     };
   }, [apiBaseUrl, items, mode, preloadImage, random, slideDurationMs]);
 
@@ -586,16 +680,26 @@ export const Gallery = ({
         <p aria-live="polite" className="gallery__status" role="status">
           Waiting for photos to load. Retrying automatically.
         </p>
-      ) : (
-        slideElement(currentSlide, 'current', layoutFor(currentSlide.item))
-      )}
-      {previousSlide === undefined
-        ? null
-        : slideElement(
-            previousSlide,
-            'previous',
-            layoutFor(previousSlide.item),
-          )}
+      ) : null}
+      {[currentSlide, previousSlide, ...preparedSlides]
+        .filter(
+          (slide, index, slides): slide is PreparedSlide =>
+            slide !== undefined && slides.indexOf(slide) === index,
+        )
+        .map((slide) => (
+          <Slide
+            key={slide.key}
+            slide={slide}
+            state={
+              slide === currentSlide
+                ? 'current'
+                : slide === previousSlide
+                  ? 'previous'
+                  : 'prepared'
+            }
+            layout={layoutFor(slide.item)}
+          />
+        ))}
       {connectionFailed ? (
         <p aria-live="polite" className="gallery__status" role="status">
           Connection lost. Continuing with the last playlist.

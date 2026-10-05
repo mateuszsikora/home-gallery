@@ -62,7 +62,16 @@ body {
   transition: opacity var(--fade-duration, 1000ms) ease-in-out;
 }
 
+.gallery__slide--prepared {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
 .gallery__slide--current {
+  /* The previous slide fades over an already opaque replacement. */
+  transition: none;
   opacity: 1;
 }
 
