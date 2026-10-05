@@ -48,6 +48,7 @@ const PRELOAD_AHEAD = 2;
 
 /** Bound each attempt and pause between unsuccessful passes through the playlist. */
 const PRELOAD_TIMEOUT_MS = 5_000;
+const MAX_PRELOAD_TIMEOUT_MS = 60_000;
 const RETRY_DELAY_MS = 5_000;
 
 /**
@@ -287,6 +288,7 @@ export const Gallery = ({
   const [currentSlide, setCurrentSlide] = useState<LoadedSlide>();
   const [previousSlide, setPreviousSlide] = useState<LoadedSlide>();
   const displayed = useRef<LoadedSlide | undefined>(undefined);
+  const preloadTimeouts = useRef(new Map<string, number>());
   const slideTiming = useRef<
     | {
         deadline: number;
@@ -364,6 +366,7 @@ export const Gallery = ({
     if (items.length === 0) {
       displayed.current = undefined;
       slideTiming.current = undefined;
+      preloadTimeouts.current.clear();
       setCurrentSlide(undefined);
       setPreviousSlide(undefined);
       return;
@@ -388,6 +391,10 @@ export const Gallery = ({
       const item = items.find((candidate) => candidate.id === id)!;
       return { item, source: resolveContentUrl(item.contentUrl, apiBaseUrl) };
     });
+    const sources = new Set(ordered.map(({ source }) => source));
+    for (const source of preloadTimeouts.current.keys()) {
+      if (!sources.has(source)) preloadTimeouts.current.delete(source);
+    }
     let disposed = false;
     let cancelDelay: (() => void) | undefined;
     const requests = new Map<
@@ -416,18 +423,26 @@ export const Gallery = ({
       if (existing !== undefined) return existing.result;
 
       const controller = new AbortController();
+      const timeoutMs =
+        preloadTimeouts.current.get(slide.source) ?? PRELOAD_TIMEOUT_MS;
       let finish: (ready: boolean) => void = () => {};
       const result = new Promise<boolean>((resolve) => {
         let settled = false;
-        const timer = window.setTimeout(
-          () => finish(false),
-          PRELOAD_TIMEOUT_MS,
-        );
+        const timer = window.setTimeout(() => {
+          // Grow only this source's next attempt: faster photos must not reset
+          // a slow photo's progress, and obsolete cancellations are not failures.
+          preloadTimeouts.current.set(
+            slide.source,
+            Math.min(timeoutMs * 2, MAX_PRELOAD_TIMEOUT_MS),
+          );
+          finish(false);
+        }, timeoutMs);
         finish = (ready) => {
           if (settled) return;
           settled = true;
           window.clearTimeout(timer);
-          if (!ready) controller.abort();
+          if (ready) preloadTimeouts.current.delete(slide.source);
+          else controller.abort();
           resolve(ready);
         };
       });

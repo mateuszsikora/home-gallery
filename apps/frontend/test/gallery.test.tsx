@@ -621,18 +621,99 @@ describe('Gallery slide deadlines', () => {
 describe('Gallery image failure recovery', () => {
   beforeEach(() => vi.useFakeTimers());
 
-  it('does not treat a rejected browser decode as ready and skips to a usable photo', async () => {
-    vi.stubGlobal(
-      'Image',
-      vi.fn(function () {
-        const image = document.createElement('img');
-        image.decode = async () => {
-          if (image.src === mediaUrl(ids.second))
-            throw new Error('decode failed');
-        };
-        return image;
-      }),
-    );
+  it.each([false, true])(
+    'rejects failed decode even when download metadata is available: %s',
+    async (metadataAvailable) => {
+      vi.stubGlobal(
+        'Image',
+        vi.fn(function () {
+          const image = document.createElement('img');
+          Object.defineProperties(image, {
+            complete: { value: metadataAvailable },
+            naturalWidth: { value: metadataAvailable ? 1_920 : 0 },
+          });
+          image.decode = async () => {
+            if (image.src === mediaUrl(ids.second))
+              throw new Error('decode failed');
+          };
+          return image;
+        }),
+      );
+      const client = {
+        getPlaylist: vi.fn().mockResolvedValue(
+          createPlaylist([ids.first, ids.second, ids.third], {
+            slideDurationMs: 1_000,
+          }),
+        ),
+      };
+      render(<Gallery apiBaseUrl="http://gallery.test" client={client} />);
+      await flushPromises();
+      const first = currentImage();
+      await advanceTime(1_000);
+      expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.third));
+      expect(renderedImages()[1]).toBe(first);
+      await advanceTime(800);
+      expect(renderedImages()).toHaveLength(1);
+    },
+  );
+
+  it.each([false, true])(
+    'allows a six-second load to recover after timeout with an existing photo: %s',
+    async (hasCurrentPhoto) => {
+      const preloadImage = vi.fn((url: string, signal?: AbortSignal) => {
+        if (url === mediaUrl(ids.first)) return;
+        return new Promise<void>((resolve) => {
+          const timer = window.setTimeout(resolve, 6_000);
+          signal?.addEventListener('abort', () => window.clearTimeout(timer), {
+            once: true,
+          });
+        });
+      });
+      const client = {
+        getPlaylist: vi
+          .fn()
+          .mockResolvedValue(
+            createPlaylist(
+              hasCurrentPhoto ? [ids.first, ids.second] : [ids.second],
+              { slideDurationMs: 1_000 },
+            ),
+          ),
+      };
+      render(
+        <Gallery
+          apiBaseUrl="http://gallery.test"
+          client={client}
+          preloadImage={preloadImage}
+        />,
+      );
+      await flushPromises();
+      await advanceTime(15_999);
+      if (hasCurrentPhoto) {
+        expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.first));
+      } else {
+        expect(renderedImages()).toHaveLength(0);
+      }
+      await advanceTime(1);
+      expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.second));
+      expect(
+        preloadImage.mock.calls.filter(([url]) => url === mediaUrl(ids.second)),
+      ).toHaveLength(2);
+    },
+  );
+
+  it('gives a slow photo longer attempts even while other photos keep advancing, then resets on success', async () => {
+    const attempts: AbortSignal[] = [];
+    const preloadImage = vi.fn((url: string, signal?: AbortSignal) => {
+      if (url !== mediaUrl(ids.second)) return;
+      attempts.push(signal!);
+      return new Promise<void>((resolve) => {
+        if (attempts.length > 2) return;
+        const timer = window.setTimeout(resolve, 6_000);
+        signal?.addEventListener('abort', () => window.clearTimeout(timer), {
+          once: true,
+        });
+      });
+    });
     const client = {
       getPlaylist: vi.fn().mockResolvedValue(
         createPlaylist([ids.first, ids.second, ids.third], {
@@ -640,14 +721,56 @@ describe('Gallery image failure recovery', () => {
         }),
       ),
     };
-    render(<Gallery apiBaseUrl="http://gallery.test" client={client} />);
+    render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={client}
+        preloadImage={preloadImage}
+      />,
+    );
     await flushPromises();
-    const first = currentImage();
-    await advanceTime(1_000);
+    await advanceTime(5_000);
     expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.third));
-    expect(renderedImages()[1]).toBe(first);
-    await advanceTime(800);
-    expect(renderedImages()).toHaveLength(1);
+    await advanceTime(1_000);
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.first));
+    await advanceTime(5_000);
+    expect(currentImage()).toHaveAttribute('src', mediaUrl(ids.second));
+    await advanceTime(1_000);
+    expect(attempts).toHaveLength(3);
+    await advanceTime(4_999);
+    expect(attempts[2]?.aborted).toBe(false);
+    await advanceTime(1);
+    expect(attempts[2]?.aborted).toBe(true);
+  });
+
+  it('caps increasing attempt timeouts and retains the retry pause for a permanently stalled photo', async () => {
+    const preloads = controlledPreloader();
+    const client = {
+      getPlaylist: vi.fn().mockResolvedValue(createPlaylist([ids.first])),
+    };
+    const view = render(
+      <Gallery
+        apiBaseUrl="http://gallery.test"
+        client={client}
+        preloadImage={preloads.preloadImage}
+      />,
+    );
+    await flushPromises();
+    for (const [index, timeout] of [
+      5_000, 10_000, 20_000, 40_000, 60_000, 60_000,
+    ].entries()) {
+      expect(preloads.requests).toHaveLength(index + 1);
+      await advanceTime(timeout - 1);
+      expect(preloads.requests[index]?.signal?.aborted).toBe(false);
+      await advanceTime(1);
+      expect(preloads.requests[index]?.signal?.aborted).toBe(true);
+      await advanceTime(4_999);
+      expect(preloads.requests).toHaveLength(index + 1);
+      await advanceTime(1);
+    }
+    expect(renderedImages()).toHaveLength(0);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('skips a stalled photo and ignores its completion after the timeout', async () => {
