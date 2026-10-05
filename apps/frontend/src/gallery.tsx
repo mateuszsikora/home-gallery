@@ -686,6 +686,9 @@ export const Gallery = ({
           (slide, index, slides): slide is PreparedSlide =>
             slide !== undefined && slides.indexOf(slide) === index,
         )
+        // Moving a retained container during promotion can cancel its CSS fade.
+        // State classes and z-index control visibility; mounting order stays fixed.
+        .sort((left, right) => left.key - right.key)
         .map((slide) => (
           <Slide
             key={slide.key}

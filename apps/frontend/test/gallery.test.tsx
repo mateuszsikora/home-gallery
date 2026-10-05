@@ -107,11 +107,13 @@ const currentImage = (): HTMLImageElement => {
   return image;
 };
 
-const renderedImages = (): HTMLImageElement[] => [
-  ...document.querySelectorAll<HTMLImageElement>(
-    'img[data-state="current"], img[data-state="previous"]',
-  ),
-];
+// Playback assertions use semantic roles; DOM order stays fixed for animation.
+const renderedImages = (): HTMLImageElement[] =>
+  ['current', 'previous'].flatMap((state) => [
+    ...document.querySelectorAll<HTMLImageElement>(
+      `img[data-state="${state}"]`,
+    ),
+  ]);
 
 const backdropImages = (): HTMLImageElement[] => [
   ...document.querySelectorAll<HTMLImageElement>(
@@ -1460,6 +1462,26 @@ describe('Gallery retained image elements', () => {
       expect(remaining.every((image) => !image.hasAttribute('src'))).toBe(true);
     },
   );
+
+  it('keeps retained slide containers in DOM order across handoffs and repeated cycles', async () => {
+    const client = {
+      getPlaylist: vi.fn().mockResolvedValue(
+        createPlaylist([ids.first, ids.second, ids.third], {
+          slideDurationMs: 1_000,
+        }),
+      ),
+    };
+    render(<Gallery apiBaseUrl="http://gallery.test" client={client} />);
+    await flushPromises();
+    for (let handoff = 0; handoff < 8; handoff += 1) {
+      const before = [...document.querySelectorAll('.gallery__slide')];
+      await advanceTime(1_000);
+      const after = [...document.querySelectorAll('.gallery__slide')];
+      expect(after.filter((slide) => before.includes(slide))).toEqual(
+        before.filter((slide) => after.includes(slide)),
+      );
+    }
+  });
 
   it('prepares mounted elements successfully under StrictMode effect replay', async () => {
     const client = {

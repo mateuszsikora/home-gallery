@@ -1,4 +1,4 @@
-/* global document, HTMLImageElement, MutationObserver, window, getComputedStyle */
+/* global document, HTMLImageElement, MutationObserver, window, getComputedStyle, requestAnimationFrame */
 import assert from 'node:assert/strict';
 import console from 'node:console';
 import { mkdir } from 'node:fs/promises';
@@ -62,11 +62,13 @@ try {
         imageFit: 'contain',
       },
     };
-    const photo = await sharp({
-      create: { width: 1200, height: 800, channels: 3, background: '#476f9c' },
-    })
-      .webp()
-      .toBuffer();
+    const photos = await Promise.all(
+      ['#476f9c', '#b45538', '#648448'].map((background) =>
+        sharp({ create: { width: 1200, height: 800, channels: 3, background } })
+          .webp()
+          .toBuffer(),
+      ),
+    );
     let releaseSlow;
     const slowResponse = new Promise((resolve) => {
       releaseSlow = resolve;
@@ -78,7 +80,11 @@ try {
     await page.route('**/media/**', async (route) => {
       if (delaySecond && route.request().url().endsWith(ids[1]))
         await slowResponse;
-      await route.fulfill({ contentType: 'image/webp', body: photo });
+      const index = ids.findIndex((id) => route.request().url().endsWith(id));
+      await route.fulfill({
+        contentType: 'image/webp',
+        body: photos[Math.max(0, index) % photos.length],
+      });
     });
     await page.addInitScript(() => {
       const nativeDecode = HTMLImageElement.prototype.decode;
@@ -87,6 +93,7 @@ try {
       const shown = new WeakSet();
       window.validation = {
         transitions: [],
+        fades: [],
         violations: [],
         maxSlides: 0,
         maxImages: 0,
@@ -123,6 +130,24 @@ try {
         if (getComputedStyle(current.parentElement).opacity !== '1')
           report.violations.push('Replacement was not opaque');
         report.transitions.push(current.src);
+        const outgoing = document.querySelector('.gallery__slide--previous');
+        if (outgoing) {
+          const fade = {
+            source: outgoing.querySelector('.gallery__image').src,
+            opacities: [],
+          };
+          report.fades.push(fade);
+          const sample = () => {
+            if (
+              !outgoing.isConnected ||
+              !outgoing.classList.contains('gallery__slide--previous')
+            )
+              return;
+            fade.opacities.push(Number(getComputedStyle(outgoing).opacity));
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        }
       }).observe(document, {
         childList: true,
         subtree: true,
@@ -218,7 +243,29 @@ try {
         .querySelector('img[data-state="current"]')
         ?.src.endsWith('/replacement.webp'),
     );
+    // Sample the entire final fade before checking all handoffs, including loops.
+    await page.waitForSelector('.gallery__slide--previous', {
+      state: 'detached',
+    });
     const report = await page.evaluate(() => window.validation);
+    assert.equal(report.fades.length, report.transitions.length - 1);
+    for (const fade of report.fades) {
+      assert.ok(
+        fade.opacities.length > 0,
+        `No animation-frame samples: ${fade.source}`,
+      );
+      if (reducedMotion === 'reduce') {
+        assert.ok(
+          fade.opacities.every((opacity) => opacity === 0),
+          JSON.stringify(fade),
+        );
+      } else {
+        assert.ok(
+          fade.opacities.some((opacity) => opacity > 0 && opacity < 1),
+          `Missing visible fade: ${JSON.stringify(fade)}`,
+        );
+      }
+    }
     assert.deepEqual(report.violations, []);
     assert.ok(report.maxSlides <= 4, JSON.stringify(report));
     assert.ok(report.maxImages <= 8, JSON.stringify(report));
