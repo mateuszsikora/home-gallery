@@ -8,7 +8,7 @@ The optional `preloadImage` integration hook receives `(url, signal, { image, ba
 
 ## Reproduce
 
-With Node.js 26 and dependencies installed:
+With Node.js 26.12.1 or newer 26.x and dependencies installed:
 
 ```bash
 npx vitest run apps/frontend/test/gallery.test.tsx

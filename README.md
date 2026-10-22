@@ -125,7 +125,7 @@ For public exposure, use the supported TLS profile in [docs/DEPLOYMENT.md](docs/
 
 ## Local development
 
-Requires Node.js 26 and the bundled npm. From a clean checkout:
+Requires Node.js 26.12.1 or newer 26.x and the bundled npm. From a clean checkout:
 
 ```bash
 npm ci
