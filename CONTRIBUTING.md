@@ -20,7 +20,7 @@ Open an issue before writing code for anything larger than a small fix. This is 
 
 One issue per pull request. Repository chores — documentation, CI configuration, dependency bumps — may replace `Closes #<issue-number>` with a one-line reason instead.
 
-The project builds on Node.js 26.12.1 or newer 26.x. The exact version is pinned in `.nvmrc`, which CI reads, and in the `Dockerfile` base images, with `engines` in `package.json` as the floor. A Node.js bump changes all three together, including a Dependabot pull request that only touches the `Dockerfile`.
+The project builds on Node.js 26.12.1 or newer 26.x. The exact version is pinned in `.nvmrc`, which CI reads, and in the `Dockerfile` base images, with `engines` in `package.json` as the floor. A Node.js bump changes all three together, including a Dependabot pull request that only touches the `Dockerfile`; CI fails until they agree.
 
 Typechecking and builds use TypeScript 7 through the `@typescript/native` npm alias, which supplies `tsc`. ESLint still needs the TypeScript 6 compiler API, so the `typescript` dependency aliases `@typescript/typescript6`, which supplies `tsc6` without conflicting with `tsc`. This follows [Microsoft's side-by-side configuration](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0). Keep both aliases when updating the compiler until the lint tooling supports the new API.
 
