@@ -74,14 +74,14 @@ WORKDIR /app/apps/telegram-bot
 
 CMD ["node", "dist/main.js"]
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS gallery
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS gallery
 
 COPY docker/web.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/frontend/dist /usr/share/nginx/html
 
 EXPOSE 8080
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS admin
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS admin
 
 COPY docker/web.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/admin/dist /usr/share/nginx/html
