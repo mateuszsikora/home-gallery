@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:26.12.1-bookworm-slim AS build
+FROM node:26.13.0-bookworm-slim AS build
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ COPY packages packages
 
 RUN npm run build
 
-FROM node:26.12.1-bookworm-slim AS production-dependencies
+FROM node:26.13.0-bookworm-slim AS production-dependencies
 
 ENV NODE_ENV=production
 WORKDIR /app
@@ -74,14 +74,14 @@ WORKDIR /app/apps/telegram-bot
 
 CMD ["node", "dist/main.js"]
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS gallery
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS gallery
 
 COPY docker/web.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/frontend/dist /usr/share/nginx/html
 
 EXPOSE 8080
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS admin
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS admin
 
 COPY docker/web.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/admin/dist /usr/share/nginx/html
